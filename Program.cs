@@ -30,11 +30,39 @@ public static class DnlibTools
     public static ModuleDefMD? Module = null;
 
     [McpServerTool, Description("Load a .NET assembly into memory")]
-    public static void LoadAssembly(
+    public static bool LoadAssembly(
         [Description("Path to the .NET assembly")]
         string AssemblyPath)
     {
         Module = ModuleDefMD.Load(AssemblyPath);
+        return Module != null;
+    }
+    
+    // Get entry point method
+    [McpServerTool, Description("Get entry point method")]
+    public static string GetEntryPoint()
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        // Get static constructor
+        var staticConstructor = Module.Types
+            .SelectMany(t => t.Methods)
+            .FirstOrDefault(m => m.IsConstructor && m.IsStatic);
+        
+        var entryPoint = Module.EntryPoint;
+        if (entryPoint == null)
+            return "No entry point found.";
+
+        var data = new
+        {
+            EntryPoint = entryPoint.FullName.ToString(),
+            EntryPointToken = entryPoint.MDToken.ToInt32(),
+            StaticConstructor = staticConstructor?.FullName.ToString(),
+            StaticConstructorToken = staticConstructor?.MDToken.ToInt32(),
+        };
+        
+        return JsonSerializer.Serialize(data);
     }
 
     [McpServerTool, Description("List all types in a .NET assembly")]
