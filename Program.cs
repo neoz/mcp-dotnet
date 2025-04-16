@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Text.Json;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 //builder.Logging.AddConsole(consoleLogOptions =>
@@ -16,6 +17,12 @@ builder.Services
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 await builder.Build().RunAsync();
+
+public class Result
+{
+    public int Token;
+    public string Name;
+}
 
 [McpServerToolType]
 public static class DnlibTools
@@ -31,73 +38,137 @@ public static class DnlibTools
     }
 
     [McpServerTool, Description("List all types in a .NET assembly")]
-    public static string[] ListTypes()
+    public static String[] ListTypes()
     {
-    
-        return Module.Types.Select(t => t.FullName).ToArray();
-    }
-    [McpServerTool, Description("List all methods in a .NET assembly")]
-    public static string[] ListMethods()
-    {
-        var methods = new List<string>();
-        foreach (var type in Module.Types)
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var types = Module.Types.Select(t => new
         {
-            foreach (var method in type.Methods)
-            {
-                methods.Add(method.FullName);
-            }
-        }
-        return methods.ToArray();
+            Name = t.Name.ToString(),
+            FullName = t.FullName.ToString(),
+            NameSpace = t.Namespace.ToString(),
+            Token = t.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { "No types found." };
     }
+    
+     // Find Types with name match regex
+    [McpServerTool, Description("List all types in a .NET assembly matching a regex")]
+    public static string[] ListTypesRegex(
+        [Description("Regex pattern to match type names")]
+        string pattern)
+    {
+        var regex = new System.Text.RegularExpressions.Regex(pattern);
+        var types = Module.Types.Where(t => regex.IsMatch(t.FullName)).Select(t => new
+        {
+            Name = t.Name.ToString(),
+            FullName = t.FullName.ToString(),
+            NameSpace = t.Namespace.ToString(),
+            Token = t.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { $"No types matching '{pattern}' found." };
+    }
+    
+    // List methods of a type name
+    [McpServerTool, Description("List all methods in a .NET assembly")]
+    public static string[] ListMethods(
+        [Description("Full Name of the type")]
+        string typeName)
+    {
+        var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
+        if (type == null)
+            return new[] { $"Type '{typeName}' not found." };
+
+        var methods = type.Methods.Select(m => new
+        {
+            Name = m.Name.ToString(),
+            FullName = m.FullName.ToString(),
+            Token = m.MDToken.ToInt32(),
+            Parameters = m.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        
+        return methods.Length > 0 ? methods : new[] { $"No methods found for '{typeName}'." };
+    }
+    
+    // Find Methods with name match regex
+    [McpServerTool, Description("Find methods name matching a regex pattern")]
+    public static string[] FindMethodsWithRegex(
+        [Description("Regex pattern to match method names")]
+        string pattern)
+    {
+        var matchingMethods = Module.Types
+            .SelectMany(t => t.Methods)
+            .Where(m => System.Text.RegularExpressions.Regex.IsMatch(m.Name, pattern))
+            .Select(t => new
+            {
+                Name = t.Name.ToString(),
+                FullName = t.FullName.ToString(),
+                Token = t.MDToken.ToInt32(),
+                Parameters = t.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+            }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+            
+        return matchingMethods.Length > 0 ? matchingMethods : new[] { $"No methods matching '{pattern}' found." };
+    }
+    
     [McpServerTool, Description("List all fields in a .NET assembly")]
     public static string[] ListFields()
     {
-        var fields = new List<string>();
-        foreach (var type in Module.Types)
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var types = Module.Types.SelectMany(t => t.Fields).Select(f => new
         {
-            foreach (var field in type.Fields)
-            {
-                fields.Add(field.FullName);
-            }
-        }
-        return fields.ToArray();
+            Name = f.Name.ToString(),
+            FullName = f.FullName.ToString(),
+            Token = f.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { "No types found." };
     }
+    
+    
     [McpServerTool, Description("List all properties in a .NET assembly")]
     public static string[] ListProperties()
     {
-        var properties = new List<string>();
-        foreach (var type in Module.Types)
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var types = Module.Types.SelectMany(t => t.Properties).Select(f => new
         {
-            foreach (var property in type.Properties)
-            {
-                properties.Add(property.FullName);
-            }
-        }
-        return properties.ToArray();
+            Name = f.Name.ToString(),
+            FullName = f.FullName.ToString(),
+            Token = f.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { "No properties found." };
     }
     [McpServerTool, Description("List all events in a .NET assembly")]
     public static string[] ListEvents()
     {
-        var events = new List<string>();
-        foreach (var type in Module.Types)
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var types = Module.Types.SelectMany(t => t.Events).Select(f => new
         {
-            foreach (var eventInfo in type.Events)
-            {
-                events.Add(eventInfo.FullName);
-            }
-        }
-        return events.ToArray();
+            Name = f.Name.ToString(),
+            FullName = f.FullName.ToString(),
+            Token = f.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { "No properties found." };
     }
     
     [McpServerTool, Description("List all resources in a .NET assembly")]
     public static string[] ListResources()
     {
-        var resources = new List<string>();
-        foreach (var resource in Module.Resources)
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
+        var types = Module.Resources.Select(f => new
         {
-            resources.Add(resource.Name);
-        }
-        return resources.ToArray();
+            Name = f.Name.ToString(),
+            ResourceType = f.ResourceType.ToString(),
+            Token = f.MDToken.ToInt32(),
+        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
+        return types.Length > 0 ? types : new[] { "No data found." };
     }
 
     [McpServerTool, Description("Get detailed information about a specific type")]
@@ -107,6 +178,7 @@ public static class DnlibTools
         if (type == null)
             return $"Type '{typeName}' not found.";
 
+        // Get detailed information about the type
         return $"Name: {type.Name}\n" +
                $"Namespace: {type.Namespace}\n" +
                $"Base Type: {type.BaseType}\n" +
@@ -134,7 +206,15 @@ public static class DnlibTools
                 {
                     if (instr.Operand is string str)
                     {
-                        strings.Add($"{method.FullName}: \"{str}\"");
+                        var data = new
+                        {
+                            MethodName = method.Name.ToString(),
+                            FullName = method.FullName.ToString(),
+                            Token = method.MDToken.ToInt32(),
+                            StringLiteral = str,
+                            InstrOffset = instr.Offset,
+                        };
+                        strings.Add(JsonSerializer.Serialize(data));
                     }
                 }
             }
@@ -148,8 +228,13 @@ public static class DnlibTools
     {
         var matchingTypes = Module.Types
             .Where(t => t.FullName.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-            .Select(t => t.FullName)
-            .ToArray();
+            .Select(f => new
+            {
+                Name = f.Name.ToString(),
+                FullName = f.FullName.ToString(),
+                Token = f.MDToken.ToInt32(),
+                Namespace = f.Namespace.ToString(),
+            }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
         return matchingTypes.Length > 0 ? matchingTypes : new[] { $"No types matching '{pattern}' found." };
     }
@@ -333,6 +418,37 @@ public static class DnlibTools
                                 results.Add($"  -> Jumps to IL_{targetInstr.Offset:X4}");
                             }
                         }
+                    }
+                }
+            }
+        }
+        
+        return results.Count > 0 ? results.ToArray() : new[] { $"No methods matching '{methodName}' found." };
+    }
+    
+    // Dump IL code for a method
+    [McpServerTool, Description("Get IL codes for a method")]
+    public static string[] GetMethodILBody(string methodName)
+    {
+        var results = new List<string>();
+        
+        foreach (var type in Module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.FullName.Contains(methodName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (method.Body == null)
+                    {
+                        results.Add($"Method {method.FullName} has no body");
+                        continue;
+                    }
+                    
+                    results.Add($"IL code for {method.FullName}:");
+                    
+                    foreach (var instr in method.Body.Instructions)
+                    {
+                        results.Add($"IL_{instr.Offset:X4}: {instr}");
                     }
                 }
             }
