@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text.Json;
+using dnlib.DotNet.Emit;
+using dnlib.PE;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 //builder.Logging.AddConsole(consoleLogOptions =>
@@ -17,12 +19,6 @@ builder.Services
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
 await builder.Build().RunAsync();
-
-public class Result
-{
-    public int Token;
-    public string Name;
-}
 
 [McpServerToolType]
 public static class DnlibTools
@@ -57,9 +53,9 @@ public static class DnlibTools
         var data = new
         {
             EntryPoint = entryPoint.FullName.ToString(),
-            EntryPointToken = entryPoint.MDToken.ToInt32(),
+            EntryPoint_MDToken = entryPoint.MDToken.ToInt32(),
             StaticConstructor = staticConstructor?.FullName.ToString(),
-            StaticConstructorToken = staticConstructor?.MDToken.ToInt32(),
+            StaticConstructor_MDToken = staticConstructor?.MDToken.ToInt32(),
         };
         
         return JsonSerializer.Serialize(data);
@@ -76,7 +72,7 @@ public static class DnlibTools
             Name = t.Name.ToString(),
             FullName = t.FullName.ToString(),
             NameSpace = t.Namespace.ToString(),
-            Token = t.MDToken.ToInt32(),
+            MDToken = t.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         return types.Length > 0 ? types : new[] { "No types found." };
     }
@@ -87,6 +83,9 @@ public static class DnlibTools
         [Description("Regex pattern to match type names")]
         string pattern)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var regex = new System.Text.RegularExpressions.Regex(pattern);
         var types = Module.Types.Where(t => regex.IsMatch(t.FullName)).Select(t => new
         {
@@ -104,6 +103,9 @@ public static class DnlibTools
         [Description("Full Name of the type")]
         string typeName)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
         if (type == null)
             return new[] { $"Type '{typeName}' not found." };
@@ -112,7 +114,8 @@ public static class DnlibTools
         {
             Name = m.Name.ToString(),
             FullName = m.FullName.ToString(),
-            Token = m.MDToken.ToInt32(),
+            MDToken = m.MDToken.ToInt32(),
+            RID = m.Rid,
             Parameters = m.MethodSig.Params.Select(p => p.ToString()).ToArray(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         
@@ -125,6 +128,8 @@ public static class DnlibTools
         [Description("Regex pattern to match method names")]
         string pattern)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
         var matchingMethods = Module.Types
             .SelectMany(t => t.Methods)
             .Where(m => System.Text.RegularExpressions.Regex.IsMatch(m.Name, pattern))
@@ -132,7 +137,8 @@ public static class DnlibTools
             {
                 Name = t.Name.ToString(),
                 FullName = t.FullName.ToString(),
-                Token = t.MDToken.ToInt32(),
+                MDToken = t.MDToken.ToInt32(),
+                RID = t.Rid,
                 Parameters = t.MethodSig.Params.Select(p => p.ToString()).ToArray(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
@@ -149,7 +155,7 @@ public static class DnlibTools
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
-            Token = f.MDToken.ToInt32(),
+            MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         return types.Length > 0 ? types : new[] { "No types found." };
     }
@@ -165,7 +171,7 @@ public static class DnlibTools
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
-            Token = f.MDToken.ToInt32(),
+            MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         return types.Length > 0 ? types : new[] { "No properties found." };
     }
@@ -179,7 +185,7 @@ public static class DnlibTools
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
-            Token = f.MDToken.ToInt32(),
+            MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         return types.Length > 0 ? types : new[] { "No properties found." };
     }
@@ -194,7 +200,7 @@ public static class DnlibTools
         {
             Name = f.Name.ToString(),
             ResourceType = f.ResourceType.ToString(),
-            Token = f.MDToken.ToInt32(),
+            MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         return types.Length > 0 ? types : new[] { "No data found." };
     }
@@ -202,6 +208,9 @@ public static class DnlibTools
     [McpServerTool, Description("Get detailed information about a specific type")]
     public static string GetTypeInfo(string typeName)
     {
+        if (Module == null)
+            return "No assembly loaded.";
+        
         var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
         if (type == null)
             return $"Type '{typeName}' not found.";
@@ -221,6 +230,9 @@ public static class DnlibTools
     [McpServerTool, Description("Find string literals in the assembly")]
     public static string[] FindStringLiterals()
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var strings = new HashSet<string>();
         
         foreach (var type in Module.Types)
@@ -238,7 +250,8 @@ public static class DnlibTools
                         {
                             MethodName = method.Name.ToString(),
                             FullName = method.FullName.ToString(),
-                            Token = method.MDToken.ToInt32(),
+                            MDToken = method.MDToken.ToInt32(),
+                            RID = method.Rid,
                             StringLiteral = str,
                             InstrOffset = instr.Offset,
                         };
@@ -254,13 +267,16 @@ public static class DnlibTools
     [McpServerTool, Description("Search for types matching a pattern")]
     public static string[] SearchTypes(string pattern)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var matchingTypes = Module.Types
             .Where(t => t.FullName.Contains(pattern, StringComparison.OrdinalIgnoreCase))
             .Select(f => new
             {
                 Name = f.Name.ToString(),
                 FullName = f.FullName.ToString(),
-                Token = f.MDToken.ToInt32(),
+                MDToken = f.MDToken.ToInt32(),
                 Namespace = f.Namespace.ToString(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
@@ -270,6 +286,8 @@ public static class DnlibTools
     [McpServerTool, Description("Examine constructor initialization for a type")]
     public static string[] ExamineConstructors(string typeName)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
         var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
         if (type == null)
             return new[] { $"Type '{typeName}' not found." };
@@ -294,6 +312,8 @@ public static class DnlibTools
     [McpServerTool, Description("List external dependencies used by a specific type")]
     public static string[] ListTypeDependencies(string typeName)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
         var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
         if (type == null)
             return new[] { $"Type '{typeName}' not found." };
@@ -338,6 +358,9 @@ public static class DnlibTools
     [McpServerTool, Description("Find all usages of a specified method")]
     public static string[] FindMethodUsages(string methodName)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var usages = new List<string>();
         
         foreach (var type in Module.Types)
@@ -363,6 +386,8 @@ public static class DnlibTools
     [McpServerTool, Description("Find possible reflection usage in the assembly")]
     public static string[] FindReflectionUsage()
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
         var results = new List<string>();
         string[] reflectionPatterns = new[] {
             "System.Reflection",
@@ -415,6 +440,9 @@ public static class DnlibTools
     [McpServerTool, Description("Extract method control flow graph")]
     public static string[] ExtractControlFlowGraph(string methodName)
     {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var results = new List<string>();
         
         foreach (var type in Module.Types)
@@ -453,11 +481,72 @@ public static class DnlibTools
         
         return results.Count > 0 ? results.ToArray() : new[] { $"No methods matching '{methodName}' found." };
     }
-    
-    // Dump IL code for a method
-    [McpServerTool, Description("Get IL codes for a method")]
-    public static string[] GetMethodILBody(string methodName)
+
+    class MethodRawBody
     {
+        public byte HeaderSize;
+        public uint CodeSize;
+        public byte[] Code;
+        public uint MethodFileOffset;
+        public uint MethodRVA;
+        public uint CodeFileOffset;
+        
+    }
+    
+    static MethodRawBody GetRawILBytes(MethodDef method, ModuleDefMD module)
+    {
+        if (!method.HasBody || method.Body == null)
+            return null;
+
+        // Get the method's RVA
+        var rva = method.RVA;
+        if (rva == 0)
+            return null;
+        
+        var output = new MethodRawBody();
+
+        // Read the method body from the module's metadata
+        var reader = module.Metadata.PEImage.CreateReader();
+        reader.Position = (uint)module.Metadata.PEImage.ToFileOffset(rva);
+        output.MethodFileOffset = reader.Position;
+        output.MethodRVA = (uint)rva;
+
+        // Read the method body header and IL code
+        // Simplified: Assumes a "fat" header (most common for methods with IL)
+        // For production code, handle tiny headers and other edge cases
+        byte headerFlags = reader.ReadByte();
+        int codeSize;
+        if ((headerFlags & 0x03) == 0x02) // Tiny header
+        {
+            codeSize = headerFlags >> 2;
+            output.HeaderSize = 1;
+        }
+        else if ((headerFlags & 0x03) == 0x03) // Fat header
+        {
+            reader.Position -= 1; // Rewind to read full header
+            var fatHeader = reader.ReadBytes(12); // Fat header is 12 bytes
+            codeSize = BitConverter.ToInt32(fatHeader, 4); // Code size at offset 4
+            output.HeaderSize = 12;
+        }
+        else
+        {
+            return null; // Invalid header
+        }
+        output.CodeSize = (uint)codeSize;
+        output.Code = reader.ReadBytes(codeSize);
+        output.CodeFileOffset = output.MethodFileOffset+output.HeaderSize;
+
+        // Read the IL code bytes
+        return output;
+    }
+    
+    // Dump IL code for a method by method name
+    [McpServerTool, Description("Get IL codes for a method by name")]
+    public static string[] GetMethodILBodyByName(string methodName)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
         var results = new List<string>();
         
         foreach (var type in Module.Types)
@@ -474,14 +563,166 @@ public static class DnlibTools
                     
                     results.Add($"IL code for {method.FullName}:");
                     
-                    foreach (var instr in method.Body.Instructions)
+                    // Get method file offset
+                    var offset = Module.Metadata.PEImage.ToFileOffset(method.RVA);
+                    
+                    
+                    // Get the raw IL bytes
+                    var data = GetRawILBytes(method, Module);
+                    if (data == null)
                     {
-                        results.Add($"IL_{instr.Offset:X4}: {instr}");
+                        results.Add($"Failed to get raw IL bytes for {method.FullName}");
+                        break;
                     }
+
+                    for (int i = 0; i < method.Body.Instructions.Count; i++)
+                    {
+                        var instr = method.Body.Instructions[i];
+                        var hexdump = "";
+                        if (i+1 < method.Body.Instructions.Count)
+                            hexdump =BitConverter.ToString(data.Code, (int)instr.Offset, (int)method.Body.Instructions[i+1].Offset-(int)instr.Offset).Replace("-", " ");
+                        else
+                            hexdump =BitConverter.ToString(data.Code, (int)instr.Offset).Replace("-", " ");
+                        results.Add($"{(data.CodeFileOffset+instr.Offset).ToString("x")} {hexdump} IL_{instr.Offset:X4}: {instr}");
+                    }
+
+                    break;
                 }
             }
         }
         
         return results.Count > 0 ? results.ToArray() : new[] { $"No methods matching '{methodName}' found." };
+    }
+    
+    // Dump IL code for a method by method RID
+    [McpServerTool, Description("Get IL codes for a method by RID")]
+    public static string[] GetMethodILBodyByRID(
+        [Description("RID value for method")] uint rid
+        )
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        var results = new List<string>();
+
+        var method = Module.ResolveMethod(rid);
+        if (method == null)
+            return new[] { $"Method with RID '{rid}' not found." };
+        
+        if (method.Body == null)
+        {
+            results.Add($"Method {method.FullName} has no body");
+            return results.ToArray();
+        }
+        
+        results.Add($"IL code for {method.FullName}:");
+        
+        // Get the raw IL bytes
+        var data = GetRawILBytes(method, Module);
+        if (data == null)
+        {
+            results.Add($"Failed to get raw IL bytes for {method.FullName}");
+            return results.ToArray();
+        }
+
+        for (int i = 0; i < method.Body.Instructions.Count; i++)
+        {
+            var instr = method.Body.Instructions[i];
+            var hexdump = "";
+            if (i+1 < method.Body.Instructions.Count)
+                hexdump =BitConverter.ToString(data.Code, (int)instr.Offset, (int)method.Body.Instructions[i+1].Offset-(int)instr.Offset).Replace("-", " ");
+            else
+                hexdump =BitConverter.ToString(data.Code, (int)instr.Offset).Replace("-", " ");
+            results.Add($"{(data.CodeFileOffset+instr.Offset).ToString("x")} {hexdump} IL_{instr.Offset:X4}: {instr}");
+        }
+        
+        return results.Count > 0 ? results.ToArray() : new[] { $"No methods with RID '{rid}' found." };
+    }
+    
+    // Find references to a specific method token, return array of strings each string is a JSON object with the following properties: MethodName, FullName, MDToken, Parameters
+    [McpServerTool, Description("Find references to a specific method")]
+    public static string[] FindMethodReferences(int token)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
+        var results = new List<string>();
+        
+        foreach (var type in Module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.Body == null) continue;
+                
+                foreach (var instr in method.Body.Instructions)
+                {
+                    if (instr.Operand is IMethodDefOrRef methodRef && methodRef.MDToken.ToInt32() == token)
+                    {
+                        var data = new
+                        {
+                            MethodName = method.Name.ToString(),
+                            FullName = method.FullName.ToString(),
+                            MDToken = method.MDToken.ToInt32(),
+                            Parameters = method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+                        };
+                        results.Add(JsonSerializer.Serialize(data));
+                    }
+                }
+            }
+        }
+        
+        return results.Count > 0 ? results.ToArray() : new[] { $"No references to method token '{token}' found." };
+    }
+    
+    // Find references to a specific string, return array of strings each string is a JSON object with the following properties: MethodName, FullName, MDToken, Parameters
+    [McpServerTool, Description("Find references to a specific string")]
+    public static string[] FindStringReferences(string str)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+        
+        var results = new List<string>();
+        
+        foreach (var type in Module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.Body == null) continue;
+                
+                foreach (var instr in method.Body.Instructions)
+                {
+                    if (instr.Operand is string strRef && strRef.Contains(str))
+                    {
+                        var data = new
+                        {
+                            MethodName = method.Name.ToString(),
+                            FullName = method.FullName.ToString(),
+                            MDToken = method.MDToken.ToInt32(),
+                            Parameters = method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+                        };
+                        results.Add(JsonSerializer.Serialize(data));
+                    }
+                }
+            }
+        }
+        
+        return results.Count > 0 ? results.ToArray() : new[] { $"No references to string '{str}' found." };
+    }
+    
+    // Read memory data at, specified RVA and size
+    [McpServerTool, Description("Read memory data at specified RVA and size")]
+    public static string ReadMemoryData(
+        [Description("RVA to read from")]
+        uint rva,
+        [Description("Size of data to read")]
+        uint size)
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        var data = Module.ReadDataAt((RVA)rva, (int)size);
+        if (data == null)
+            return $"No data found at RVA {rva:X8} with size {size}.";
+        
+        return BitConverter.ToString(data).Replace("-", " ");
     }
 }
