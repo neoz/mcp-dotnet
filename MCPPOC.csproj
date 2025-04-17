@@ -10,7 +10,9 @@
   <ItemGroup>
     <PackageReference Include="dnlib" Version="4.4.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.3.25171.5" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageReference Include="ModelContextProtocol" Version="0.1.0-preview.8" />
+    <PackageReference Include="xunit" Version="2.9.3" />
   </ItemGroup>
 
 </Project>
