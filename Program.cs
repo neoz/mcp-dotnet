@@ -183,7 +183,7 @@ public static class DnlibTools
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No types found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No fields found." };
     }
     
     
