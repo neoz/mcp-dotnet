@@ -41,13 +41,17 @@ public class DnlibToolsTests
         DnlibTools.LoadAssembly(_testAssemblyPath);
 
         // Act
-        string[] result = DnlibTools.ListTypes();
+        string[] result = DnlibTools.ListTypes(0,0);
+        string[] result1 = DnlibTools.ListTypes(0,1);
+
 
         // Assert
         Assert.NotNull(result);
         Assert.NotEmpty(result);
         Assert.DoesNotContain("No assembly loaded.", result);
         Assert.DoesNotContain("No types found.", result);
+        Assert.True(result.Length>result1.Length);
+        Assert.True(result1.Length==1);
     }
 
     [Fact]
