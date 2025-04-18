@@ -7,6 +7,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using dnlib.DotNet.Emit;
 using dnlib.PE;
+using MCPPOC;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 //builder.Logging.AddConsole(consoleLogOptions =>
@@ -62,7 +63,12 @@ public static class DnlibTools
     }
 
     [McpServerTool, Description("List all types in a .NET assembly")]
-    public static String[] ListTypes()
+    public static String[] ListTypes(
+            [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+            [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100)
+    
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -74,14 +80,19 @@ public static class DnlibTools
             NameSpace = t.Namespace.ToString(),
             MDToken = t.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { "No types found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset,pageSize) : new[] { "No types found." };
     }
     
      // Find Types with name match regex
     [McpServerTool, Description("List all types in a .NET assembly matching a regex")]
     public static string[] ListTypesRegex(
         [Description("Regex pattern to match type names")]
-        string pattern)
+        string pattern,
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -94,14 +105,19 @@ public static class DnlibTools
             NameSpace = t.Namespace.ToString(),
             Token = t.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { $"No types matching '{pattern}' found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset,pageSize) : new[] { $"No types matching '{pattern}' found." };
     }
     
     // List methods of a type name
     [McpServerTool, Description("List all methods in a .NET assembly")]
     public static string[] ListMethods(
         [Description("Full Name of the type")]
-        string typeName)
+        string typeName,
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -119,14 +135,19 @@ public static class DnlibTools
             Parameters = m.MethodSig.Params.Select(p => p.ToString()).ToArray(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         
-        return methods.Length > 0 ? methods : new[] { $"No methods found for '{typeName}'." };
+        return methods.Length > 0 ? paginate.Paginate(methods,offset, pageSize) : new[] { $"No methods found for '{typeName}'." };
     }
     
     // Find Methods with name match regex
     [McpServerTool, Description("Find methods name matching a regex pattern")]
     public static string[] FindMethodsWithRegex(
         [Description("Regex pattern to match method names")]
-        string pattern)
+        string pattern,
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -142,11 +163,16 @@ public static class DnlibTools
                 Parameters = t.MethodSig.Params.Select(p => p.ToString()).ToArray(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
-        return matchingMethods.Length > 0 ? matchingMethods : new[] { $"No methods matching '{pattern}' found." };
+        return matchingMethods.Length > 0 ? paginate.Paginate(matchingMethods,offset, pageSize) : new[] { $"No methods matching '{pattern}' found." };
     }
     
     [McpServerTool, Description("List all fields in a .NET assembly")]
-    public static string[] ListFields()
+    public static string[] ListFields(
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -157,12 +183,17 @@ public static class DnlibTools
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { "No types found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No fields found." };
     }
     
     
     [McpServerTool, Description("List all properties in a .NET assembly")]
-    public static string[] ListProperties()
+    public static string[] ListProperties(
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -173,10 +204,15 @@ public static class DnlibTools
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { "No properties found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No properties found." };
     }
     [McpServerTool, Description("List all events in a .NET assembly")]
-    public static string[] ListEvents()
+    public static string[] ListEvents(
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -187,11 +223,16 @@ public static class DnlibTools
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { "No properties found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No properties found." };
     }
     
     [McpServerTool, Description("List all resources in a .NET assembly")]
-    public static string[] ListResources()
+    public static string[] ListResources(
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -202,7 +243,7 @@ public static class DnlibTools
             ResourceType = f.ResourceType.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? types : new[] { "No data found." };
+        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No data found." };
     }
 
     [McpServerTool, Description("Get detailed information about a specific type")]
@@ -228,7 +269,12 @@ public static class DnlibTools
     }
     
     [McpServerTool, Description("Find string literals in the assembly")]
-    public static string[] FindStringLiterals()
+    public static string[] FindStringLiterals(
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -261,17 +307,24 @@ public static class DnlibTools
             }
         }
         
-        return strings.ToArray();
+        return paginate.Paginate(strings.ToArray(),offset, pageSize);
     }
 
-    [McpServerTool, Description("Search for types matching a pattern")]
-    public static string[] SearchTypes(string pattern)
+    [McpServerTool, Description("Search for types full name containing a substring")]
+    public static string[] SearchTypes(
+        [Description("Substring to search for")]
+        string substring,
+        [Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100
+        )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
         
         var matchingTypes = Module.Types
-            .Where(t => t.FullName.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            .Where(t => t.FullName.Contains(substring, StringComparison.OrdinalIgnoreCase))
             .Select(f => new
             {
                 Name = f.Name.ToString(),
@@ -280,7 +333,7 @@ public static class DnlibTools
                 Namespace = f.Namespace.ToString(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
-        return matchingTypes.Length > 0 ? matchingTypes : new[] { $"No types matching '{pattern}' found." };
+        return matchingTypes.Length > 0 ? paginate.Paginate(matchingTypes,offset, pageSize) : new[] { $"No types matching '{substring}' found." };
     }
 
     [McpServerTool, Description("Examine constructor initialization for a type")]
@@ -356,7 +409,12 @@ public static class DnlibTools
     }
 
     [McpServerTool, Description("Find all usages of a specified method")]
-    public static string[] FindMethodUsages(string methodName)
+    public static string[] FindMethodUsages(string methodName,
+    [Description("Offset to start listing from(start at 0)")]
+    int offset = 0,
+    [Description("Number of items to list(100 is a good number,0 means remainder)")]
+    int pageSize = 100
+    )
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -380,11 +438,14 @@ public static class DnlibTools
             }
         }
         
-        return usages.Count > 0 ? usages.ToArray() : new[] { $"No usages of '{methodName}' found." };
+        return usages.Count > 0 ? paginate.Paginate(usages.ToArray(),offset, pageSize) : new[] { $"No usages of '{methodName}' found." };
     }
 
     [McpServerTool, Description("Find possible reflection usage in the assembly")]
-    public static string[] FindReflectionUsage()
+    public static string[] FindReflectionUsage([Description("Offset to start listing from(start at 0)")]
+        int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")]
+        int pageSize = 100)
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
@@ -434,7 +495,7 @@ public static class DnlibTools
             }
         }
         
-        return results.Count > 0 ? results.ToArray() : new[] { "No reflection usage found." };
+        return results.Count > 0 ? paginate.Paginate(results.ToArray(),offset, pageSize) : new[] { "No reflection usage found." };
     }
 
     [McpServerTool, Description("Extract method control flow graph")]
