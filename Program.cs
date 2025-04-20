@@ -30,16 +30,23 @@ public static class DnlibTools
     public static InstructionParser parser = null;
 
     [McpServerTool, Description("Load a .NET assembly into memory")]
-    public static bool LoadAssembly(
+    public static string LoadAssembly(
         [Description("Path to the .NET assembly")]
         string AssemblyPath)
     {
-        Module = ModuleDefMD.Load(AssemblyPath);
-        if (Module!= null)
+        try
         {
-            parser = new InstructionParser(Module);
+            Module = ModuleDefMD.Load(AssemblyPath);
+            if (Module != null)
+            {
+                parser = new InstructionParser(Module);
+            }
+            return $"Assembly '{AssemblyPath}' loaded successfully.";
         }
-        return Module != null;
+        catch (Exception ex)
+        {
+            return $"Failed to load assembly: {ex.Message}";
+        }
     }
     
     public static bool IsMixedModeAssembly()
@@ -854,47 +861,54 @@ public static class DnlibTools
     {
         if (Module == null)
             return "No assembly loaded.";
-        
-        if (mixedMode)
+
+        try
         {
-            //Save the assembly in mixed mode to the specified path and write options
-            var options = new NativeModuleWriterOptions(Module,false)
+            if (mixedMode)
             {
-                MetadataOptions =
+                //Save the assembly in mixed mode to the specified path and write options
+                var options = new NativeModuleWriterOptions(Module, false)
                 {
-                    Flags = MetadataFlags.PreserveAll
-                },
-                Logger = DummyLogger.NoThrowInstance,
-                AddCheckSum = true,
-            };
-            Module.NativeWrite(path, options);
+                    MetadataOptions =
+                    {
+                        Flags = MetadataFlags.PreserveAll | MetadataFlags.KeepOldMaxStack
+                    },
+                    Logger = DummyLogger.NoThrowInstance,
+                    AddCheckSum = true,
+                };
+                Module.NativeWrite(path, options);
+            }
+            else
+            {
+                // Save the assembly to the specified path and write options
+                var options = new ModuleWriterOptions(Module)
+                {
+                    MetadataOptions =
+                    {
+                        Flags = MetadataFlags.PreserveAll | MetadataFlags.KeepOldMaxStack
+                    },
+                    Logger = DummyLogger.NoThrowInstance,
+                    AddCheckSum = true,
+                };
+                Module.Write(path, options);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            // Save the assembly to the specified path and write options
-            var options = new ModuleWriterOptions(Module)
-            {
-                MetadataOptions =
-                {
-                    Flags = MetadataFlags.PreserveAll
-                },
-                Logger = DummyLogger.NoThrowInstance,
-                AddCheckSum = true,
-            };
-            Module.Write(path,options);
+            return $"Failed to save assembly: {ex.Message}";
         }
-        
+
         return $"Assembly saved to {path}.";
     }
     
     // Patch method instruction
-    [McpServerTool, Description("Patch method single instruction")]
+    [McpServerTool, Description("Patch an instruction of a method")]
     public static string UpdateMethodInstruction(
         [Description("Method RID to patch")]
         uint rid,
-        [Description("Offset of the instruction to update")]
+        [Description("Offset to update")]
         uint offset,
-        [Description("single instruction text (e.g., 'nop', 'ldstr \"Hello\"')")]
+        [Description("new instruction to replace (e.g., 'nop')")]
         string newInstruction)
     {
         if (Module == null)
@@ -912,26 +926,88 @@ public static class DnlibTools
             return $"Instruction at offset {offset} not found in method {method.FullName}.";
         
         // Parse the new instruction
-        var newInstructions = parser.ParseSingleInstruction(newInstruction);
-        if (newInstructions == null)
+        var ins = parser.ParseSingleInstruction(newInstruction);
+        if (ins == null )
             return $"Failed to parse new instruction: {newInstruction}";
-        
-        // Special operand case
-        if (newInstructions.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+
+        if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
         {
-            var parts = ((string)newInstructions.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+            var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2)
                 return $"Instruction at offset {offset} has an invalid format";
             var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
             var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
             if (targetInstruction == null)
                 return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
-            newInstructions.Operand = targetInstruction;
+            ins.Operand = targetInstruction;
         }
         
         // Replace the instruction
+        var index = method.Body.Instructions.IndexOf(instruction);
+        if (index < 0)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        method.Body.Instructions[index] = ins;
+        
+        method.Body.UpdateInstructionOffsets();
+        
+        return $"Method {method.FullName} updated successfully.";
+    }
+    
+    
+    // Patch method instructions
+    [McpServerTool, Description("Patch method instructions")]
+    public static string UpdateMethodInstructions(
+        [Description("Method RID to patch")]
+        uint rid,
+        [Description("Start offset to update")]
+        uint offset,
+        [Description("New instructions to replace, separated by new lines (e.g., 'nop\nnop')")]
+        string newInstruction)
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        var method = Module.ResolveMethod(rid);
+        if (method == null)
+            return $"Method with RID '{rid}' not found.";
+        
+        if (method.Body == null)
+            return $"Method {method.FullName} has no body";
+        
+        var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
+        if (instruction == null)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        
+        // Parse the new instruction
+        var newInstructions = parser.ParseInstructions(newInstruction);
+        if (newInstructions == null || newInstructions.Count == 0)
+            return $"Failed to parse new instruction: {newInstruction}";
+
+        foreach (var ins in newInstructions)
+        {
+            if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+            {
+                var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2)
+                    return $"Instruction at offset {offset} has an invalid format";
+                var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+                var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+                if (targetInstruction == null)
+                    return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+                ins.Operand = targetInstruction;
+            }
+        }
+        
+        // Replace the instructions start from the specified offset
         var i = method.Body.Instructions.IndexOf(instruction);
-        method.Body.Instructions[i] = newInstructions;
+        if (i < 0)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        for (int j = i; j < i+newInstructions.Count; j++)
+        {
+            method.Body.Instructions[j] = newInstructions[j-i];
+        }
+
+        method.Body.UpdateInstructionOffsets();
         
         return $"Method {method.FullName} update successfully.";
     }
