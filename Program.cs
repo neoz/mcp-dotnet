@@ -6,6 +6,8 @@ using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text.Json;
 using dnlib.DotNet.Emit;
+using dnlib.DotNet.MD;
+using dnlib.DotNet.Writer;
 using dnlib.PE;
 using MCPPOC;
 
@@ -21,10 +23,11 @@ builder.Services
     .WithToolsFromAssembly();
 await builder.Build().RunAsync();
 
-[McpServerToolType]
+[McpServerToolType, Description("MCP Server for Dotnet Reverse Engineering")]
 public static class DnlibTools
 {
     public static ModuleDefMD? Module = null;
+    public static InstructionParser parser = null;
 
     [McpServerTool, Description("Load a .NET assembly into memory")]
     public static bool LoadAssembly(
@@ -32,7 +35,58 @@ public static class DnlibTools
         string AssemblyPath)
     {
         Module = ModuleDefMD.Load(AssemblyPath);
+        if (Module!= null)
+        {
+            parser = new InstructionParser(Module);
+        }
         return Module != null;
+    }
+    
+    public static bool IsMixedModeAssembly()
+    {
+        if (Module == null)
+            return false;
+        
+        // Check if the module is a native or mixed-mode module
+        if (Module.IsILOnly)
+        {
+            // ILOnly indicates pure managed code
+            return false;
+        }
+
+        // Check if there is a native entry point
+        if (Module.NativeEntryPoint != 0)
+        {
+            return true;
+        }
+
+        // Check module kind (optional, for additional context)
+        if (Module.Kind == ModuleKind.Windows || Module.Kind == ModuleKind.Dll)
+        {
+            // Win32 or Native DLLs may contain native code
+            // Further checks (e.g., for native methods) could be added here
+            return true;
+        }
+
+        // If none of the above conditions are met, assume it's not mixed mode
+        return false;
+    }
+    
+    // Get metadata of the assembly
+    [McpServerTool, Description("Get metadata of the assembly")]
+    public static string GetMetadata()
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        var metadata = new
+        {
+            AssemblyName = Module.Name,
+            EntryPoint = Module.EntryPoint?.FullName.ToString(),
+            MixedMode = IsMixedModeAssembly()
+        };
+        
+        return JsonSerializer.Serialize(metadata);
     }
     
     // Get entry point method
@@ -55,8 +109,10 @@ public static class DnlibTools
         {
             EntryPoint = entryPoint.FullName.ToString(),
             EntryPoint_MDToken = entryPoint.MDToken.ToInt32(),
+            EntryPoint_RID = entryPoint.Rid,
             StaticConstructor = staticConstructor?.FullName.ToString(),
             StaticConstructor_MDToken = staticConstructor?.MDToken.ToInt32(),
+            StaticConstructor_RID = staticConstructor?.Rid,
         };
         
         return JsonSerializer.Serialize(data);
@@ -770,7 +826,7 @@ public static class DnlibTools
     }
     
     // Read memory data at, specified RVA and size
-    [McpServerTool, Description("Read memory data at specified RVA and size")]
+    [McpServerTool, Description("Read memory data at specified RVA with size")]
     public static string ReadMemoryData(
         [Description("RVA to read from")]
         uint rva,
@@ -784,6 +840,99 @@ public static class DnlibTools
         if (data == null)
             return $"No data found at RVA {rva:X8} with size {size}.";
         
-        return BitConverter.ToString(data).Replace("-", " ");
+        return JsonSerializer.Serialize(data);
+    }
+    
+    // Save assembly using dnlib
+    [McpServerTool, Description("Save assembly to a file")]
+    public static string SaveAssembly(
+        [Description("Path to save the assembly")]
+        string path,
+        [Description("Whether to save in mixed mode")]
+        bool mixedMode = false
+        )
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        if (mixedMode)
+        {
+            //Save the assembly in mixed mode to the specified path and write options
+            var options = new NativeModuleWriterOptions(Module,false)
+            {
+                MetadataOptions =
+                {
+                    Flags = MetadataFlags.PreserveAll
+                },
+                Logger = DummyLogger.NoThrowInstance,
+                AddCheckSum = true,
+            };
+            Module.NativeWrite(path, options);
+        }
+        else
+        {
+            // Save the assembly to the specified path and write options
+            var options = new ModuleWriterOptions(Module)
+            {
+                MetadataOptions =
+                {
+                    Flags = MetadataFlags.PreserveAll
+                },
+                Logger = DummyLogger.NoThrowInstance,
+                AddCheckSum = true,
+            };
+            Module.Write(path,options);
+        }
+        
+        return $"Assembly saved to {path}.";
+    }
+    
+    // Patch method instruction
+    [McpServerTool, Description("Patch method single instruction")]
+    public static string UpdateMethodInstruction(
+        [Description("Method RID to patch")]
+        uint rid,
+        [Description("Offset of the instruction to update")]
+        uint offset,
+        [Description("single instruction text (e.g., 'nop', 'ldstr \"Hello\"')")]
+        string newInstruction)
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        var method = Module.ResolveMethod(rid);
+        if (method == null)
+            return $"Method with RID '{rid}' not found.";
+        
+        if (method.Body == null)
+            return $"Method {method.FullName} has no body";
+        
+        var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
+        if (instruction == null)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        
+        // Parse the new instruction
+        var newInstructions = parser.ParseSingleInstruction(newInstruction);
+        if (newInstructions == null)
+            return $"Failed to parse new instruction: {newInstruction}";
+        
+        // Special operand case
+        if (newInstructions.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+        {
+            var parts = ((string)newInstructions.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+                return $"Instruction at offset {offset} has an invalid format";
+            var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+            var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+            if (targetInstruction == null)
+                return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+            newInstructions.Operand = targetInstruction;
+        }
+        
+        // Replace the instruction
+        var i = method.Body.Instructions.IndexOf(instruction);
+        method.Body.Instructions[i] = newInstructions;
+        
+        return $"Method {method.FullName} update successfully.";
     }
 }
