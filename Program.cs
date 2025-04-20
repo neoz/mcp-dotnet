@@ -902,6 +902,59 @@ public static class DnlibTools
     }
     
     // Patch method instruction
+    [McpServerTool, Description("Patch an instruction of a method")]
+    public static string UpdateMethodInstruction(
+        [Description("Method RID to patch")]
+        uint rid,
+        [Description("Offset to update")]
+        uint offset,
+        [Description("new instruction to replace (e.g., 'nop')")]
+        string newInstruction)
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        var method = Module.ResolveMethod(rid);
+        if (method == null)
+            return $"Method with RID '{rid}' not found.";
+        
+        if (method.Body == null)
+            return $"Method {method.FullName} has no body";
+        
+        var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
+        if (instruction == null)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        
+        // Parse the new instruction
+        var ins = parser.ParseSingleInstruction(newInstruction);
+        if (ins == null )
+            return $"Failed to parse new instruction: {newInstruction}";
+
+        if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+        {
+            var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+                return $"Instruction at offset {offset} has an invalid format";
+            var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+            var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+            if (targetInstruction == null)
+                return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+            ins.Operand = targetInstruction;
+        }
+        
+        // Replace the instruction
+        var index = method.Body.Instructions.IndexOf(instruction);
+        if (index < 0)
+            return $"Instruction at offset {offset} not found in method {method.FullName}.";
+        method.Body.Instructions[index] = ins;
+        
+        method.Body.UpdateInstructionOffsets();
+        
+        return $"Method {method.FullName} updated successfully.";
+    }
+    
+    
+    // Patch method instructions
     [McpServerTool, Description("Patch method instructions")]
     public static string UpdateMethodInstructions(
         [Description("Method RID to patch")]
