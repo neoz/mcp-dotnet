@@ -5,7 +5,7 @@ using Xunit;
 
 public class DnlibToolsTests
 {
-    private const string _testAssemblyPath = "../../../mcp_example/ConsoleApp1.dll"; 
+    private const string _testAssemblyPath = "../../../mcp_example/ConsoleApplication1.exe"; // Path to the test assembly
     private const string _methodName = "<Main>$"; 
     private const string _typeName = "Program"; 
 
@@ -13,10 +13,8 @@ public class DnlibToolsTests
     public void LoadAssembly_LoadsValidAssembly()
     {
         // Act
-        bool result = DnlibTools.LoadAssembly(_testAssemblyPath);
+        DnlibTools.LoadAssembly(_testAssemblyPath);
 
-        // Assert
-        Assert.True(result);
         Assert.NotNull(DnlibTools.Module);
     }
 
@@ -450,11 +448,10 @@ public class DnlibToolsTests
         
         // Example input string
         var input = "br.s IL_0020";
-
+    
         try
         {
-            DnlibTools.UpdateMethodInstruction(1,30,"br.s IL_0020");
-            DnlibTools.UpdateMethodInstruction(1,23,"ldc.i4.1");
+            DnlibTools.UpdateMethodInstructions(1,0,"nop\nret");
         }
         catch (Exception ex)
         {
