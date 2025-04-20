@@ -5,7 +5,7 @@ using Xunit;
 
 public class DnlibToolsTests
 {
-    private const string _testAssemblyPath = "C:\\working\\ida\\mcp-reversing-dataset\\dotnet\\ConsoleApp1.dll"; 
+    private const string _testAssemblyPath = "../../../mcp_example/ConsoleApp1.dll"; 
     private const string _methodName = "<Main>$"; 
     private const string _typeName = "Program"; 
 
@@ -440,5 +440,25 @@ public class DnlibToolsTests
         Assert.NotNull(result);
         Assert.NotEqual("No assembly loaded.", result);
         Assert.NotNull(invalidResult);
+    }
+    
+    [Fact]
+    public void UpdateMethodTest()
+    {
+        //Load a module (e.g., the current assembly)
+        DnlibTools.LoadAssembly(_testAssemblyPath);
+        
+        // Example input string
+        var input = "br.s IL_0020";
+
+        try
+        {
+            DnlibTools.UpdateMethodInstruction(1,30,"br.s IL_0020");
+            DnlibTools.UpdateMethodInstruction(1,23,"ldc.i4.1");
+        }
+        catch (Exception ex)
+        {
+            throw ex;
+        }
     }
 }
