@@ -36,7 +36,33 @@ public static class DnlibTools
     {
         try
         {
-            Module = ModuleDefMD.Load(AssemblyPath);
+            // Load reference assembly module for resolving types
+            var resolver = new AssemblyResolver();
+            var moduleContext = new ModuleContext(resolver);
+            
+            // Create an assembly resolver that can find referenced assemblies
+            resolver.DefaultModuleContext = moduleContext;
+            resolver.EnableTypeDefCache = true;
+            
+            // Load the main module
+            Module = ModuleDefMD.Load(AssemblyPath, moduleContext);
+            resolver.AddToCache(Module);
+            
+            // Load referenced assemblies
+            foreach (var asmRef in Module.GetAssemblyRefs())
+            {
+                try
+                {
+                    // Resolve and load the referenced assembly
+                    var assembly = resolver.Resolve(asmRef, Module);
+                    resolver.AddToCache(assembly);
+                }
+                catch (Exception ex)
+                {
+                    return $"Failed to load assembly: {ex.Message}";
+                }
+            }
+            Module = ModuleDefMD.Load(AssemblyPath,context: moduleContext);
             if (Module != null)
             {
                 parser = new InstructionParser(Module);
@@ -926,7 +952,16 @@ public static class DnlibTools
             return $"Instruction at offset {offset} not found in method {method.FullName}.";
         
         // Parse the new instruction
-        var ins = parser.ParseSingleInstruction(newInstruction);
+        Instruction ins = null;
+        try
+        {
+            ins = parser.ParseSingleInstruction(newInstruction);
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to parse new instruction: {ex.Message}";
+        }
+
         if (ins == null )
             return $"Failed to parse new instruction: {newInstruction}";
 
@@ -971,15 +1006,27 @@ public static class DnlibTools
         if (method == null)
             return $"Method with RID '{rid}' not found.";
         
-        if (method.Body == null)
+        if (method.Body == null && offset > 0)
             return $"Method {method.FullName} has no body";
+        
+        if (method.Body == null)
+            method.Body = new CilBody();
         
         var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
         if (instruction == null)
             return $"Instruction at offset {offset} not found in method {method.FullName}.";
         
         // Parse the new instruction
-        var newInstructions = parser.ParseInstructions(newInstruction);
+        List<Instruction> newInstructions = new List<Instruction>();
+        try
+        {
+            newInstructions = parser.ParseInstructions(newInstruction);
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to parse new instructions: {ex.Message}";
+        }
+
         if (newInstructions == null || newInstructions.Count == 0)
             return $"Failed to parse new instruction: {newInstruction}";
 
@@ -998,17 +1045,75 @@ public static class DnlibTools
             }
         }
         
-        // Replace the instructions start from the specified offset
-        var i = method.Body.Instructions.IndexOf(instruction);
-        if (i < 0)
-            return $"Instruction at offset {offset} not found in method {method.FullName}.";
-        for (int j = i; j < i+newInstructions.Count; j++)
+        // If the new instructions are longer than the original, clear the existing instructions
+        if (newInstructions.Count > method.Body.Instructions.Count)
         {
-            method.Body.Instructions[j] = newInstructions[j-i];
-        }
+            method.Body.Instructions.Clear();
+            foreach (var ins in newInstructions)
+            {
+                method.Body.Instructions.Add(ins);
+            }
+        } 
+        else
+        {
+            var i = method.Body.Instructions.IndexOf(instruction);
+            if (i < 0)
+                return $"Instruction at offset {offset} not found in method {method.FullName}.";
+            
+            // Check if the new instructions fit in the existing instructions
+            if (i + newInstructions.Count > method.Body.Instructions.Count)
+            {
+                for (int j = 0; j < i + newInstructions.Count - method.Body.Instructions.Count; j++)
+                {
+                    // Add empty instructions to fill the gap
+                    method.Body.Instructions.Add(new Instruction(OpCodes.Nop));
+                }
+            }
+            
+            // Replace the instructions start from the specified offset
+            for (int j = i; j < i+newInstructions.Count; j++)
+            {
+                method.Body.Instructions[j] = newInstructions[j-i];
+            }
 
+        }
+        
         method.Body.UpdateInstructionOffsets();
         
         return $"Method {method.FullName} update successfully.";
+    }
+    
+    // Find all usages of a specified field
+    [McpServerTool, Description("Find all usages of a specified field")]
+    public static string[] FindFieldReferences(
+        string fieldName,
+        [Description("Offset to start listing from(start at 0)")] int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")] int pageSize = 100)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var references = new List<string>();
+
+        foreach (var type in Module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.Body == null) continue;
+
+                foreach (var instr in method.Body.Instructions)
+                {
+                    if (instr.Operand is IField field &&
+                        field.FullName.Contains(fieldName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        references.Add($"{method.FullName} accesses {field.FullName} at IL_{instr.Offset:X4}");
+                    }
+                }
+            }
+        }
+
+        return references.Count > 0
+            ? paginate.Paginate(references.ToArray(), offset, pageSize)
+            : new[] { $"No references to field '{fieldName}' found." };
     }
 }

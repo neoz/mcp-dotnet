@@ -28,6 +28,7 @@ public class InstructionParser
                 map[opcode.Name.Replace(".", "")] = opcode;
             }
         }
+
         return map;
     }
 
@@ -65,7 +66,7 @@ public class InstructionParser
             if (!_opcodeMap.TryGetValue(opcodeName, out opcode))
                 throw new ArgumentException($"Unknown opcode: {opcodeName}");
         }
-            
+
 
         object operand = null;
         if (parts.Length > 1)
@@ -78,7 +79,7 @@ public class InstructionParser
     }
 
     // Parse the operand based on the opcode and operand string
-    private object ParseOperand(OpCode opcode, string operandStr)
+    internal object ParseOperand(OpCode opcode, string operandStr)
     {
         switch (opcode.OperandType)
         {
@@ -113,36 +114,191 @@ public class InstructionParser
             // Add more operand types as needed
             default:
                 return operandStr;
-                //throw new NotSupportedException($"Operand type {opcode.OperandType} not supported yet");
+            //throw new NotSupportedException($"Operand type {opcode.OperandType} not supported yet");
         }
     }
 
     // Resolve a method reference from a string (e.g., "System.Console::WriteLine")
+    // Resolve a method reference from a string
     private IMethod ResolveMethod(string methodStr)
     {
-        // Simplified parsing: assumes format "Namespace.Type::Method"
-        var parts = methodStr.Split(new[] { "::" }, StringSplitOptions.None);
-        if (parts.Length != 2)
-            throw new ArgumentException($"Invalid method format: {methodStr}");
+        try
+        {
+            // Handle more complex method signatures like:
+            // "instance void [System.Runtime]System.DateTime::.ctor(int32, int32, int32)"
 
-        var typeName = parts[0];
-        var methodName = parts[1];
+            // Extract assembly name if present
+            string asmName = null;
+            if (methodStr.Contains('[') && methodStr.Contains(']'))
+            {
+                int startIndex = methodStr.IndexOf('[') + 1;
+                int endIndex = methodStr.IndexOf(']');
+                if (startIndex < endIndex)
+                {
+                    asmName = methodStr.Substring(startIndex, endIndex - startIndex);
+                    methodStr = methodStr.Replace($"[{asmName}]", "");
+                }
+            }
 
-        var type = _module.Find(typeName, true);
-        if (type == null)
-            throw new ArgumentException($"Type not found: {typeName}");
+            // Check for instance/static method indicator
+            bool isInstance = false;
+            if (methodStr.StartsWith("instance "))
+            {
+                isInstance = true;
+                methodStr = methodStr.Substring("instance ".Length);
+            }
+            else if (methodStr.StartsWith("static "))
+            {
+                methodStr = methodStr.Substring("static ".Length);
+            }
 
-        // Find the method (simplified, assumes no overloads or parameters for brevity)
-        var method = type.FindMethod(methodName);
-        if (method == null)
-            throw new ArgumentException($"Method not found: {methodName} in {typeName}");
+            // Extract return type and remaining parts
+            int spaceIndex = methodStr.IndexOf(' ');
+            if (spaceIndex <= 0)
+                throw new ArgumentException($"Invalid method format: {methodStr}");
 
-        return _module.Import(method);
+            string returnType = methodStr.Substring(0, spaceIndex);
+            methodStr = methodStr.Substring(spaceIndex + 1);
+
+            // Split by :: to get type and method name with params
+            var parts = methodStr.Split(new[] { "::" }, StringSplitOptions.None);
+            if (parts.Length != 2)
+                throw new ArgumentException($"Invalid method format: {methodStr}");
+
+            string typeName = parts[0].Trim();
+            string methodNameWithParams = parts[1].Trim();
+
+            // Extract method name and parameters
+            int parenIndex = methodNameWithParams.IndexOf('(');
+            if (parenIndex < 0)
+                throw new ArgumentException($"Invalid method name format: {methodNameWithParams}");
+
+            string methodName = methodNameWithParams.Substring(0, parenIndex);
+            string paramsStr = methodNameWithParams.Substring(parenIndex + 1).TrimEnd(')');
+
+            // Get type reference
+            ITypeDefOrRef typeRef;
+            if (asmName != null)
+            {
+                // Try to find the assembly reference
+                var asmRef = _module.GetAssemblyRefs()
+                    .FirstOrDefault(a => a.Name == asmName || a.FullName == asmName);
+
+                if (asmRef == null)
+                    throw new ArgumentException($"Assembly reference not found: {asmName}");
+
+                // Create type reference with assembly reference
+                typeRef = new TypeRefUser(_module, typeName.Substring(typeName.LastIndexOf('.') + 1),
+                    typeName.Substring(0, typeName.LastIndexOf('.')),
+                    new AssemblyRefUser(asmRef));
+            }
+            else
+            {
+                // Look in the current module
+                typeRef = _module.Find(typeName, true);
+            }
+
+            if (typeRef == null)
+            {
+                // fallback to TypeRefUser if not found
+                typeRef = new TypeRefUser(_module, typeName.Substring(typeName.LastIndexOf('.') + 1),
+                    typeName.Substring(0, typeName.LastIndexOf('.')));
+            }
+            
+            if (typeRef == null)
+                throw new ArgumentException($"Type not found: {typeName}");
+
+            // Parse parameters
+            var parameters = new List<TypeSig>();
+            if (!string.IsNullOrWhiteSpace(paramsStr))
+            {
+                var paramTypes = paramsStr.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var paramType in paramTypes)
+                {
+                    parameters.Add(ResolveTypeSignature(paramType.Trim()));
+                }
+            }
+
+            // Create method reference
+            var returnTypeSig = ResolveTypeSignature(returnType);
+
+            return new MemberRefUser(
+                _module,
+                methodName,
+                MethodSig.CreateInstance(returnTypeSig, parameters.ToArray()),
+                typeRef);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException($"Failed to resolve method: {methodStr}", ex);
+        }
+    }
+
+// Helper method to resolve type signatures like "int32", "string", etc.
+    private TypeSig ResolveTypeSignature(string typeSignature)
+    {
+        switch (typeSignature.ToLowerInvariant())
+        {
+            case "void": return _module.CorLibTypes.Void;
+            case "bool": return _module.CorLibTypes.Boolean;
+            case "char": return _module.CorLibTypes.Char;
+            case "int8":
+            case "sbyte": return _module.CorLibTypes.SByte;
+            case "uint8":
+            case "byte": return _module.CorLibTypes.Byte;
+            case "int16":
+            case "short": return _module.CorLibTypes.Int16;
+            case "uint16":
+            case "ushort": return _module.CorLibTypes.UInt16;
+            case "int32":
+            case "int": return _module.CorLibTypes.Int32;
+            case "uint32":
+            case "uint": return _module.CorLibTypes.UInt32;
+            case "int64":
+            case "long": return _module.CorLibTypes.Int64;
+            case "uint64":
+            case "ulong": return _module.CorLibTypes.UInt64;
+            case "float32":
+            case "single":
+            case "float": return _module.CorLibTypes.Single;
+            case "float64":
+            case "double": return _module.CorLibTypes.Double;
+            case "string": return _module.CorLibTypes.String;
+            case "object": return _module.CorLibTypes.Object;
+            default:
+                // Try to resolve as a custom type
+                var type = _module.Find(typeSignature, true);
+                if (type != null)
+                    return type.ToTypeSig();
+                else
+                {
+                    ITypeDefOrRef typeRef = _module.CorLibTypes.GetTypeRef("System", typeSignature);
+                    if (typeRef != null)
+                        return typeRef.ToTypeSig();
+                    
+                    // For custom types, parse namespace and name
+                    string ns = typeSignature.Contains(".") 
+                        ? typeSignature.Substring(0, typeSignature.LastIndexOf('.')) 
+                        : "";
+                    string name = typeSignature.Contains(".") 
+                        ? typeSignature.Substring(typeSignature.LastIndexOf('.') + 1) 
+                        : typeSignature;
+            
+                    typeRef = new TypeRefUser(_module, name, ns);
+                    return typeRef.ToTypeSig();
+                }
+
+                //throw new ArgumentException($"Unsupported type signature: {typeSignature}");
+        }
     }
 
     // Resolve a type reference from a string (e.g., "System.Object")
     private ITypeDefOrRef ResolveType(string typeStr)
     {
+        ITypeDefOrRef typeRef = _module.CorLibTypes.GetTypeRef("System", typeStr);
+        if (typeRef != null)
+            return typeRef;
+        
         var type = _module.Find(typeStr, true);
         if (type == null)
             throw new ArgumentException($"Type not found: {typeStr}");

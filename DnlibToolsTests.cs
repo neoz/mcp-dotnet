@@ -451,7 +451,42 @@ public class DnlibToolsTests
     
         try
         {
-            DnlibTools.UpdateMethodInstructions(1,0,"nop\nret");
+            string s;
+            // Main, normal case
+            s = DnlibTools.UpdateMethodInstructions(1,0,"nop\nret");
+            Assert.Contains("successfully", s);
+            // cctor, ins < body ins and offset + ins > body ins
+            s = DnlibTools.UpdateMethodInstructions(7,5,"nop\nnop\nret");
+            Assert.Contains("successfully", s);
+            // cctor, ins > body ins
+            s = DnlibTools.UpdateMethodInstructions(7,0,"nop\nnop\nnop\nret");
+            Assert.Contains("successfully", s);
+
+        }
+        catch (Exception ex)
+        {
+            throw ex;
+        }
+    }
+    
+    [Fact]
+    public void UpdateMethodTest_2()
+    {
+        //Load a module (e.g., the current assembly)
+        DnlibTools.LoadAssembly(_testAssemblyPath);
+        
+        var input = @"
+            ldc.i4 2055
+            ldc.i4.1
+            ldc.i4.1
+            newobj instance void [System.Runtime]System.DateTime::.ctor(int32, int32, int32)
+            ret
+        ";
+
+        try
+        {
+            var s = DnlibTools.UpdateMethodInstructions(7,5,input);
+            Assert.Contains("successfully", s);
         }
         catch (Exception ex)
         {
