@@ -36,7 +36,33 @@ public static class DnlibTools
     {
         try
         {
-            Module = ModuleDefMD.Load(AssemblyPath);
+            // Load reference assembly module for resolving types
+            var resolver = new AssemblyResolver();
+            var moduleContext = new ModuleContext(resolver);
+            
+            // Create an assembly resolver that can find referenced assemblies
+            resolver.DefaultModuleContext = moduleContext;
+            resolver.EnableTypeDefCache = true;
+            
+            // Load the main module
+            Module = ModuleDefMD.Load(AssemblyPath, moduleContext);
+            resolver.AddToCache(Module);
+            
+            // Load referenced assemblies
+            foreach (var asmRef in Module.GetAssemblyRefs())
+            {
+                try
+                {
+                    // Resolve and load the referenced assembly
+                    var assembly = resolver.Resolve(asmRef, Module);
+                    resolver.AddToCache(assembly);
+                }
+                catch (Exception ex)
+                {
+                    return $"Failed to load assembly: {ex.Message}";
+                }
+            }
+            Module = ModuleDefMD.Load(AssemblyPath,context: moduleContext);
             if (Module != null)
             {
                 parser = new InstructionParser(Module);
@@ -1055,5 +1081,39 @@ public static class DnlibTools
         method.Body.UpdateInstructionOffsets();
         
         return $"Method {method.FullName} update successfully.";
+    }
+    
+    // Find all usages of a specified field
+    [McpServerTool, Description("Find all usages of a specified field")]
+    public static string[] FindFieldReferences(
+        string fieldName,
+        [Description("Offset to start listing from(start at 0)")] int offset = 0,
+        [Description("Number of items to list(100 is a good number,0 means remainder)")] int pageSize = 100)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var references = new List<string>();
+
+        foreach (var type in Module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.Body == null) continue;
+
+                foreach (var instr in method.Body.Instructions)
+                {
+                    if (instr.Operand is IField field &&
+                        field.FullName.Contains(fieldName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        references.Add($"{method.FullName} accesses {field.FullName} at IL_{instr.Offset:X4}");
+                    }
+                }
+            }
+        }
+
+        return references.Count > 0
+            ? paginate.Paginate(references.ToArray(), offset, pageSize)
+            : new[] { $"No references to field '{fieldName}' found." };
     }
 }
