@@ -926,7 +926,16 @@ public static class DnlibTools
             return $"Instruction at offset {offset} not found in method {method.FullName}.";
         
         // Parse the new instruction
-        var ins = parser.ParseSingleInstruction(newInstruction);
+        Instruction ins = null;
+        try
+        {
+            ins = parser.ParseSingleInstruction(newInstruction);
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to parse new instruction: {ex.Message}";
+        }
+
         if (ins == null )
             return $"Failed to parse new instruction: {newInstruction}";
 
@@ -982,7 +991,16 @@ public static class DnlibTools
             return $"Instruction at offset {offset} not found in method {method.FullName}.";
         
         // Parse the new instruction
-        var newInstructions = parser.ParseInstructions(newInstruction);
+        List<Instruction> newInstructions = new List<Instruction>();
+        try
+        {
+            newInstructions = parser.ParseInstructions(newInstruction);
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to parse new instructions: {ex.Message}";
+        }
+
         if (newInstructions == null || newInstructions.Count == 0)
             return $"Failed to parse new instruction: {newInstruction}";
 

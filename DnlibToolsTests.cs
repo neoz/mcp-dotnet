@@ -468,4 +468,29 @@ public class DnlibToolsTests
             throw ex;
         }
     }
+    
+    [Fact]
+    public void UpdateMethodTest_2()
+    {
+        //Load a module (e.g., the current assembly)
+        DnlibTools.LoadAssembly(_testAssemblyPath);
+        
+        var input = @"
+            ldc.i4 2055
+            ldc.i4.1
+            ldc.i4.1
+            newobj instance void [System.Runtime]System.DateTime::.ctor(int32, int32, int32)
+            ret
+        ";
+
+        try
+        {
+            var s = DnlibTools.UpdateMethodInstructions(7,5,input);
+            Assert.Contains("successfully", s);
+        }
+        catch (Exception ex)
+        {
+            throw ex;
+        }
+    }
 }
