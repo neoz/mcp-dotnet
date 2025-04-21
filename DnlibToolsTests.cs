@@ -451,7 +451,17 @@ public class DnlibToolsTests
     
         try
         {
-            DnlibTools.UpdateMethodInstructions(1,0,"nop\nret");
+            string s;
+            // Main, normal case
+            s = DnlibTools.UpdateMethodInstructions(1,0,"nop\nret");
+            Assert.Contains("successfully", s);
+            // cctor, ins < body ins and offset + ins > body ins
+            s = DnlibTools.UpdateMethodInstructions(7,5,"nop\nnop\nret");
+            Assert.Contains("successfully", s);
+            // cctor, ins > body ins
+            s = DnlibTools.UpdateMethodInstructions(7,0,"nop\nnop\nnop\nret");
+            Assert.Contains("successfully", s);
+
         }
         catch (Exception ex)
         {

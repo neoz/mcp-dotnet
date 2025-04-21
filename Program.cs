@@ -971,8 +971,11 @@ public static class DnlibTools
         if (method == null)
             return $"Method with RID '{rid}' not found.";
         
-        if (method.Body == null)
+        if (method.Body == null && offset > 0)
             return $"Method {method.FullName} has no body";
+        
+        if (method.Body == null)
+            method.Body = new CilBody();
         
         var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
         if (instruction == null)
@@ -998,15 +1001,39 @@ public static class DnlibTools
             }
         }
         
-        // Replace the instructions start from the specified offset
-        var i = method.Body.Instructions.IndexOf(instruction);
-        if (i < 0)
-            return $"Instruction at offset {offset} not found in method {method.FullName}.";
-        for (int j = i; j < i+newInstructions.Count; j++)
+        // If the new instructions are longer than the original, clear the existing instructions
+        if (newInstructions.Count > method.Body.Instructions.Count)
         {
-            method.Body.Instructions[j] = newInstructions[j-i];
-        }
+            method.Body.Instructions.Clear();
+            foreach (var ins in newInstructions)
+            {
+                method.Body.Instructions.Add(ins);
+            }
+        } 
+        else
+        {
+            var i = method.Body.Instructions.IndexOf(instruction);
+            if (i < 0)
+                return $"Instruction at offset {offset} not found in method {method.FullName}.";
+            
+            // Check if the new instructions fit in the existing instructions
+            if (i + newInstructions.Count > method.Body.Instructions.Count)
+            {
+                for (int j = 0; j < i + newInstructions.Count - method.Body.Instructions.Count; j++)
+                {
+                    // Add empty instructions to fill the gap
+                    method.Body.Instructions.Add(new Instruction(OpCodes.Nop));
+                }
+            }
+            
+            // Replace the instructions start from the specified offset
+            for (int j = i; j < i+newInstructions.Count; j++)
+            {
+                method.Body.Instructions[j] = newInstructions[j-i];
+            }
 
+        }
+        
         method.Body.UpdateInstructionOffsets();
         
         return $"Method {method.FullName} update successfully.";
