@@ -196,9 +196,17 @@ public class InstructionParser
             {
                 // Look in the current module
                 typeRef = _module.Find(typeName, true);
-                if (typeRef == null)
-                    throw new ArgumentException($"Type not found: {typeName}");
             }
+
+            if (typeRef == null)
+            {
+                // fallback to TypeRefUser if not found
+                typeRef = new TypeRefUser(_module, typeName.Substring(typeName.LastIndexOf('.') + 1),
+                    typeName.Substring(0, typeName.LastIndexOf('.')));
+            }
+            
+            if (typeRef == null)
+                throw new ArgumentException($"Type not found: {typeName}");
 
             // Parse parameters
             var parameters = new List<TypeSig>();
@@ -262,14 +270,35 @@ public class InstructionParser
                 var type = _module.Find(typeSignature, true);
                 if (type != null)
                     return type.ToTypeSig();
+                else
+                {
+                    ITypeDefOrRef typeRef = _module.CorLibTypes.GetTypeRef("System", typeSignature);
+                    if (typeRef != null)
+                        return typeRef.ToTypeSig();
+                    
+                    // For custom types, parse namespace and name
+                    string ns = typeSignature.Contains(".") 
+                        ? typeSignature.Substring(0, typeSignature.LastIndexOf('.')) 
+                        : "";
+                    string name = typeSignature.Contains(".") 
+                        ? typeSignature.Substring(typeSignature.LastIndexOf('.') + 1) 
+                        : typeSignature;
+            
+                    typeRef = new TypeRefUser(_module, name, ns);
+                    return typeRef.ToTypeSig();
+                }
 
-                throw new ArgumentException($"Unsupported type signature: {typeSignature}");
+                //throw new ArgumentException($"Unsupported type signature: {typeSignature}");
         }
     }
 
     // Resolve a type reference from a string (e.g., "System.Object")
     private ITypeDefOrRef ResolveType(string typeStr)
     {
+        ITypeDefOrRef typeRef = _module.CorLibTypes.GetTypeRef("System", typeStr);
+        if (typeRef != null)
+            return typeRef;
+        
         var type = _module.Find(typeStr, true);
         if (type == null)
             throw new ArgumentException($"Type not found: {typeStr}");

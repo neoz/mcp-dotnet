@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Reflection.Emit;
 using dnlib.DotNet;
+using dnlib.DotNet.Emit;
 using MCPPOC;
 using Xunit;
 
@@ -8,6 +9,7 @@ namespace MCPPOC;
 
 public class InstructionParserTest
 {
+    private const string _testAssemblyPath = "../../../mcp_example/dnlib.dll"; // Path to the test assembly
 
     [Fact]
     public void ParseInstructionsTest()
@@ -89,32 +91,42 @@ public class InstructionParserTest
     }
     
     [Fact]
-    public void ParseInstructionsTest_2()
+    public void ParseInstructions_FullTest()
     {
-        var module = ModuleDefMD.Load(typeof(Program).Assembly.Location);
+        var module = ModuleDefMD.Load(_testAssemblyPath);
 
-        var parser = new InstructionParser(module);
-
-        // Example input string
-        var input = @"
-            ldc.i4 2055
-            ldc.i4.1
-            ldc.i4.1
-            newobj instance void [System.Runtime]System.DateTime::.ctor(int32, int32, int32)
-            ret
-        ";
-
-        try
+        foreach (var type in module.GetTypes())
         {
-            var instructions = parser.ParseInstructions(input);
-            foreach (var instr in instructions)
+            // Loop all methods in the type
+            foreach (var method in type.Methods)
             {
-                Console.WriteLine($"Parsed: {instr}");
+                // Check if the method has a body
+                if (method.HasBody)
+                {
+                    // Get the IL instructions
+                    var ilInstructions = method.Body.Instructions;
+
+                    // Create an InstructionParser instance
+                    var parser = new InstructionParser(module);
+                    
+                    // Parse the instructions
+                    foreach (var instruction in ilInstructions)
+                    {
+                        try
+                        {
+                            var s = $"{instruction.ToString()}";
+                            s = s.Substring(s.IndexOf(" ", StringComparison.Ordinal) + 1);
+                            var parsedInstruction = parser.ParseSingleInstruction(s);
+                            //Console.WriteLine($"Parsed instruction: {parsedInstruction}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error parsing instruction: {instruction.ToString()} {ex.Message}");
+                        }
+                    }
+                }
             }
         }
-        catch (Exception ex)
-        {
-            throw ex;
-        }
+        
     }
 }
