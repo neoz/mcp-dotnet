@@ -1064,7 +1064,7 @@ public static class DnlibTools
                                 $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
                         ListSwitch.Add(targetInstruction);
                     }
-
+                    ins.Operand = ListSwitch.ToArray();
                     break;
                 }
                 case OperandType.InlineVar:
@@ -1072,7 +1072,8 @@ public static class DnlibTools
                 {
                     if (ins.Operand == null)
                         return $"Instruction at offset {offset} has an invalid format";
-                    
+                    var op = parser.ResolveParameter((string)ins.Operand, method);
+                    ins.Operand = op;
                     break;
                 }
             }

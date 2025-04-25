@@ -149,6 +149,9 @@ public class InstructionParser
                 // Handle local variables or arguments (e.g., ldloc.0, ldarg.1)
                 if (int.TryParse(operandStr, out var varIndex))
                     return varIndex;
+                
+                ResolveParameter(operandStr);
+                
                 return operandStr;
                 //throw new ArgumentException($"Invalid variable index: {operandStr}");
             
@@ -179,6 +182,56 @@ public class InstructionParser
                 return operandStr;
             //throw new NotSupportedException($"Operand type {opcode.OperandType} not supported yet");
         }
+    }
+    
+    public object ResolveParameter(string operandStr, MethodDef method = null)
+    {
+        // Check if it's a local variable reference (ldloc, stloc)
+        if (operandStr.StartsWith("V_", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(operandStr.Substring(2), out var localIndex))
+        {
+            return localIndex;
+        }
+
+        // Check if it's an argument reference (ldarg, starg)
+        if (operandStr.StartsWith("A_", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(operandStr.Substring(2), out var argIndex))
+        {
+            return argIndex;
+        }
+
+        // For named locals and parameters, try to resolve them if method context is provided
+        if (method != null)
+        {
+            // Check if it's a named local variable
+            if (method.Body?.Variables != null)
+            {
+                for (int i = 0; i < method.Body.Variables.Count; i++)
+                {
+                    var local = method.Body.Variables[i];
+                    if (local.Name == operandStr)
+                    {
+                        return i; // Return the index of the local variable
+                    }
+                }
+            }
+
+            // Check if it's a named parameter
+            if (method.Parameters != null)
+            {
+                for (int i = 0; i < method.Parameters.Count; i++)
+                {
+                    var param = method.Parameters[i];
+                    if (param.Name == operandStr)
+                    {
+                        return i; // Return the index of the parameter
+                    }
+                }
+            }
+        }
+
+        // If we couldn't resolve the name, return the string for later resolution
+        return operandStr;
     }
     
     private IField ResolveField(string fieldStr)
