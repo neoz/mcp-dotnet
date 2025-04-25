@@ -58,6 +58,14 @@ public class InstructionParser
         if (parts.Length == 0)
             return null;
 
+        if (line.StartsWith("switch", StringComparison.OrdinalIgnoreCase))
+        {
+            parts = new string[2];
+            // switch(IL_0018,IL_0021,IL_002A,IL_0033)
+            parts[0] = "switch";
+            parts[1] = line.Substring("switch".Length).Trim();
+        }
+
         var opcodeName = parts[0];
         if (!_opcodeMap.TryGetValue(opcodeName, out var opcode))
         {
@@ -109,14 +117,155 @@ public class InstructionParser
                 if (!string.IsNullOrEmpty(operandStr))
                     throw new ArgumentException($"Opcode {opcode.Name} does not expect an operand");
                 return null;
-                return operandStr;
+            case OperandType.InlineI8:
+                // Handle long integer literals (e.g., ldc.i8 42L)
+                if (operandStr.EndsWith("L", StringComparison.OrdinalIgnoreCase))
+                    operandStr = operandStr.Substring(0, operandStr.Length - 1);
+                if (long.TryParse(operandStr, out var longValue))
+                    return longValue;
+                throw new ArgumentException($"Invalid long integer operand: {operandStr}");
 
+            case OperandType.InlineR:
+                // Handle floating point literals (e.g., ldc.r8 3.14)
+                if (double.TryParse(operandStr, out var doubleValue))
+                    return doubleValue;
+                throw new ArgumentException($"Invalid floating point operand: {operandStr}");
+
+            case OperandType.ShortInlineR:
+                // Handle single precision floating point literals (e.g., ldc.r4 3.14)
+                if (float.TryParse(operandStr, out var floatValue))
+                    return floatValue;
+                throw new ArgumentException($"Invalid single precision floating point operand: {operandStr}");
+            
+            case OperandType.ShortInlineBrTarget:
+            case OperandType.InlineBrTarget:
+                // Handle branch targets (e.g., br IL_0010)
+                if (operandStr.StartsWith("IL_", StringComparison.OrdinalIgnoreCase))
+                    return operandStr; // Return as string, will be resolved later
+                throw new ArgumentException($"Invalid branch target: {operandStr}");
+
+            case OperandType.InlineVar:
+            case OperandType.ShortInlineVar:
+                // Handle local variables or arguments (e.g., ldloc.0, ldarg.1)
+                if (int.TryParse(operandStr, out var varIndex))
+                    return varIndex;
+                return operandStr;
+                //throw new ArgumentException($"Invalid variable index: {operandStr}");
+            
+            case OperandType.InlineSwitch:
+                // Handle switch targets (e.g., switch (IL_0010, IL_0020, IL_0030))
+                if (operandStr.StartsWith("(") && operandStr.EndsWith(")"))
+                {
+                    var targets = operandStr.Substring(1, operandStr.Length - 2)
+                        .Split(',')
+                        .Select(t => t.Trim())
+                        .ToArray();
+                    return targets;
+                }
+                throw new ArgumentException($"Invalid switch targets: {operandStr}");
+
+            case OperandType.InlineTok:
+                // Handle token references which could be types, methods or fields
+                if (operandStr.Contains("::"))
+                {
+                    if (operandStr.Contains("("))
+                        return ResolveMethod(operandStr); // Method reference
+                    return ResolveField(operandStr); // Field reference
+                }
+                return ResolveType(operandStr); // Type reference
+            
             // Add more operand types as needed
             default:
                 return operandStr;
             //throw new NotSupportedException($"Operand type {opcode.OperandType} not supported yet");
         }
     }
+    
+    private IField ResolveField(string fieldStr)
+{
+    try
+    {
+        // Extract assembly name if present
+        string asmName = null;
+        if (fieldStr.Contains('[') && fieldStr.Contains(']'))
+        {
+            int startIndex = fieldStr.IndexOf('[') + 1;
+            int endIndex = fieldStr.IndexOf(']');
+            if (startIndex < endIndex)
+            {
+                asmName = fieldStr.Substring(startIndex, endIndex - startIndex);
+                fieldStr = fieldStr.Replace($"[{asmName}]", "");
+            }
+        }
+
+        // Check for static/instance field indicator and remove it
+        if (fieldStr.StartsWith("instance "))
+            fieldStr = fieldStr.Substring("instance ".Length);
+        else if (fieldStr.StartsWith("static "))
+            fieldStr = fieldStr.Substring("static ".Length);
+
+        // Extract field type and remaining parts
+        int spaceIndex = fieldStr.IndexOf(' ');
+        if (spaceIndex <= 0)
+            throw new ArgumentException($"Invalid field format: {fieldStr}");
+
+        string fieldType = fieldStr.Substring(0, spaceIndex);
+        fieldStr = fieldStr.Substring(spaceIndex + 1);
+
+        // Split by :: to get type and field name
+        var parts = fieldStr.Split(new[] { "::" }, StringSplitOptions.None);
+        if (parts.Length != 2)
+            throw new ArgumentException($"Invalid field format: {fieldStr}");
+
+        string typeName = parts[0].Trim();
+        string fieldName = parts[1].Trim();
+
+        // Get type reference
+        ITypeDefOrRef typeRef;
+        if (asmName != null)
+        {
+            // Try to find the assembly reference
+            var asmRef = _module.GetAssemblyRefs()
+                .FirstOrDefault(a => a.Name == asmName || a.FullName == asmName);
+
+            if (asmRef == null)
+                throw new ArgumentException($"Assembly reference not found: {asmName}");
+
+            // Create type reference with assembly reference
+            typeRef = new TypeRefUser(_module, typeName.Substring(typeName.LastIndexOf('.') + 1),
+                typeName.Substring(0, typeName.LastIndexOf('.')),
+                new AssemblyRefUser(asmRef));
+        }
+        else
+        {
+            // Look in the current module
+            typeRef = _module.Find(typeName, true);
+        }
+
+        if (typeRef == null)
+        {
+            // Fallback to TypeRefUser if not found
+            int lastDot = typeName.LastIndexOf('.');
+            string ns = lastDot > 0 ? typeName.Substring(0, lastDot) : "";
+            string name = lastDot > 0 ? typeName.Substring(lastDot + 1) : typeName;
+            typeRef = new TypeRefUser(_module, name, ns);
+        }
+
+        // Create field signature
+        var fieldTypeSig = ResolveTypeSignature(fieldType);
+
+        // Create field reference
+        return new MemberRefUser(
+            _module,
+            fieldName,
+            new FieldSig(fieldTypeSig),
+            typeRef);
+    }
+    catch (Exception ex)
+    {
+        throw new ArgumentException($"Failed to resolve field: {fieldStr}", ex);
+    }
+}
 
     // Resolve a method reference from a string (e.g., "System.Console::WriteLine")
     // Resolve a method reference from a string

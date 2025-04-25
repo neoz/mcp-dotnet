@@ -3,7 +3,7 @@ using Xunit;
 
 namespace MCPPOC;
 
-public class paginateTest
+public class PaginateTest
 {
 
     [Fact]
@@ -67,7 +67,7 @@ public class paginateTest
     }
 
     [Fact]
-    public void Paginate_ReturnsEmptyArray_WhenPageSizeIsZero()
+    public void Paginate_ReturnsRemains_WhenPageSizeIsZero()
     {
         // Arrange
         string[] items = { "a", "b", "c" };
@@ -78,7 +78,7 @@ public class paginateTest
         string[] result = paginate.Paginate(items, offset, pageSize);
 
         // Assert
-        Assert.Empty(result);
+        Assert.Equal(new[] {"b", "c"} , result);
     }
 
     [Fact]

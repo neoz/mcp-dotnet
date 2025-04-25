@@ -1032,17 +1032,78 @@ public static class DnlibTools
 
         foreach (var ins in newInstructions)
         {
-            if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+            switch (ins.OpCode.OperandType)
             {
-                var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length != 2)
-                    return $"Instruction at offset {offset} has an invalid format";
-                var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
-                var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
-                if (targetInstruction == null)
-                    return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
-                ins.Operand = targetInstruction;
+                case OperandType.ShortInlineBrTarget:
+                {
+                    var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length != 2)
+                        return $"Instruction at offset {offset} has an invalid format";
+                    var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+                    var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+                    if (targetInstruction == null)
+                        return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+                    ins.Operand = targetInstruction;
+                    break;
+                }
+                case OperandType.InlineSwitch:
+                {
+                    if (ins.Operand == null)
+                        return $"Instruction at offset {offset} has an invalid format";
+
+                    var ListSwitch = new List<Instruction>();
+                    foreach (var data in ins.Operand as string[])
+                    {
+                        var parts = data.Split('_', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length != 2)
+                            return $"Instruction at offset {offset} has an invalid format";
+                        var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+                        var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+                        if (targetInstruction == null)
+                            return
+                                $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+                        ListSwitch.Add(targetInstruction);
+                    }
+
+                    break;
+                }
+                case OperandType.InlineVar:
+                case OperandType.ShortInlineVar:
+                {
+                    if (ins.Operand == null)
+                        return $"Instruction at offset {offset} has an invalid format";
+                    
+                    break;
+                }
             }
+            // if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+            // {
+            //     var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
+            //     if (parts.Length != 2)
+            //         return $"Instruction at offset {offset} has an invalid format";
+            //     var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+            //     var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+            //     if (targetInstruction == null)
+            //         return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+            //     ins.Operand = targetInstruction;
+            // } else if (ins.OpCode.OperandType == OperandType.InlineSwitch)
+            // {
+            //     if (ins.Operand == null)
+            //         return $"Instruction at offset {offset} has an invalid format";
+            //     
+            //     var ListSwitch = new List<Instruction>();
+            //     foreach (var data in ins.Operand as string[])
+            //     {
+            //         var parts = data.Split('_', StringSplitOptions.RemoveEmptyEntries);
+            //         if (parts.Length != 2)
+            //             return $"Instruction at offset {offset} has an invalid format";
+            //         var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
+            //         var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
+            //         if (targetInstruction == null)
+            //             return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
+            //         ListSwitch.Add(targetInstruction);
+            //     }
+            // }
         }
         
         // If the new instructions are longer than the original, clear the existing instructions
