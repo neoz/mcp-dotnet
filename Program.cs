@@ -211,8 +211,8 @@ public static class DnlibTools
     }
     
     // Find Methods with name match regex
-    [McpServerTool, Description("Find methods name matching a regex pattern")]
-    public static string[] FindMethodsWithRegex(
+    [McpServerTool, Description("Find methods by name matching a regex pattern")]
+    public static string[] Find_Methods_By_Name(
         [Description("Regex pattern to match method names")]
         string pattern,
         [Description("Offset to start listing from(start at 0)")]

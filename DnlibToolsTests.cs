@@ -80,8 +80,8 @@ public class DnlibToolsTests
         string pattern = "Main";
 
         // Act
-        string[] result = DnlibTools.FindMethodsWithRegex(pattern);
-        string[] nonExistingResult = DnlibTools.FindMethodsWithRegex("NonExistingMethodXYZ123");
+        string[] result = DnlibTools.Find_Methods_By_Name(pattern);
+        string[] nonExistingResult = DnlibTools.Find_Methods_By_Name("NonExistingMethodXYZ123");
 
         // Assert
         Assert.NotNull(result);
@@ -244,7 +244,7 @@ public class DnlibToolsTests
         DnlibTools.LoadAssembly(_testAssemblyPath);
         
         // First find a valid method with RID
-        string[] methods = DnlibTools.FindMethodsWithRegex("Main");
+        string[] methods = DnlibTools.Find_Methods_By_Name("Main");
         Assert.NotEmpty(methods);
         
         JsonElement methodInfo = JsonSerializer.Deserialize<JsonElement>(methods[0]);
@@ -272,7 +272,7 @@ public class DnlibToolsTests
         DnlibTools.LoadAssembly(_testAssemblyPath);
         
         // Try to find a method token from any method that might be referenced
-        string[] methods = DnlibTools.FindMethodsWithRegex("Console");
+        string[] methods = DnlibTools.Find_Methods_By_Name("Console");
         if (methods.Length == 0 || methods[0].Contains("No methods matching"))
         {
             // Skip test if we can't find a good method
@@ -434,7 +434,7 @@ public class DnlibToolsTests
     {
         DnlibTools.LoadAssembly(_testAssemblyPath);
         // First find a valid method with RID
-        string[] methods = DnlibTools.FindMethodsWithRegex("Main");
+        string[] methods = DnlibTools.Find_Methods_By_Name("Main");
         Assert.NotEmpty(methods);
         JsonElement methodInfo = JsonSerializer.Deserialize<JsonElement>(methods[0]);
         uint rid = (uint)methodInfo.GetProperty("RID").GetInt64();
