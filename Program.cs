@@ -976,4 +976,62 @@ public static class DnlibTools
             return $"Decompilation failed: {ex.Message}\n{ex.StackTrace}";
         }
     }
+    
+    [McpServerTool, Description("Get values of static fields for a type")]
+    public static string[] GetStaticFieldValues(
+        [Description("Full name of the type to inspect")]
+        string typeName)
+    {
+        if (Module == null)
+            return new[] { "No assembly loaded." };
+
+        var type = Module.Types.FirstOrDefault(t => t.FullName == typeName);
+        if (type == null)
+            return new[] { $"Type '{typeName}' not found." };
+
+        var results = new List<string>();
+    
+        // Get all static fields in the type
+        var staticFields = type.Fields.Where(f => f.IsStatic).ToList();
+    
+        if (staticFields.Count == 0)
+            return new[] { $"No static fields found in type '{typeName}'." };
+    
+        foreach (var field in staticFields)
+        {
+            try
+            {
+                // Get basic field information
+                var fieldInfo = new
+                {
+                    Name = field.Name.ToString(),
+                    FullName = field.FullName,
+                    FieldType = field.FieldType.ToString(),
+                    Attributes = field.Attributes.ToString(),
+                    MDToken = field.MDToken.ToInt32(),
+                    IsLiteral = field.IsLiteral,
+                    HasConstant = field.HasConstant,
+                    Constant = field.HasConstant ? field.Constant.Value : "N/A"
+                };
+            
+                // For literal/constant fields, we can get the value directly
+                if (field.HasConstant)
+                {
+                    results.Add(JsonSerializer.Serialize(fieldInfo));
+                }
+                else
+                {
+                    // For non-literal static fields, we can only report metadata
+                    // Getting runtime values would require loading the assembly into AppDomain
+                    results.Add(JsonSerializer.Serialize(fieldInfo));
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add($"Error retrieving info for field {field.FullName}: {ex.Message}");
+            }
+        }
+
+        return results.ToArray();
+    }
 }

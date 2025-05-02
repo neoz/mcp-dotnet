@@ -442,4 +442,14 @@ public class DnlibToolsTests
         string result = DnlibTools.Decompile_Method_By_RID(rid);
         Assert.DoesNotContain("Decompilation failed", result);
     }
+    
+    [Fact]
+    public void GetStaticFieldValues()
+    {
+        DnlibTools.LoadAssembly(_testAssemblyPath);
+        // First find a valid method with RID
+        
+        var result = DnlibTools.GetStaticFieldValues("ConsoleApplication1.Program");
+        Assert.NotNull(result);
+    }
 }
