@@ -34,32 +34,6 @@ public class DnlibToolsTests
     }
 
     [Fact]
-    public void ListTypes_ReturnsTypesFromAssembly()
-    {
-        // Arrange
-        DnlibTools.LoadAssembly(_testAssemblyPath);
-
-        // Act
-        string[] allTypes = DnlibTools.ListTypes(0, 0);
-        string[] firstType = DnlibTools.ListTypes(0, 1);
-        string[] secondPage = DnlibTools.ListTypes(1, 1);
-
-        // Assert
-        Assert.NotNull(allTypes);
-        Assert.NotEmpty(allTypes);
-        Assert.NotNull(firstType);
-        Assert.Single(firstType);
-        Assert.True(allTypes.Length > firstType.Length);
-        
-        // If there's more than one type, second page should return data
-        if (allTypes.Length > 1)
-        {
-            Assert.NotEmpty(secondPage);
-            Assert.NotEqual(firstType[0], secondPage[0]);
-        }
-    }
-
-    [Fact]
     public void ListTypesRegex_ReturnsMatchingTypes()
     {
         // Arrange
@@ -245,26 +219,6 @@ public class DnlibToolsTests
     }
 
     [Fact]
-    public void FindMethodUsages_ReturnsMethodUsages()
-    {
-        // Arrange
-        DnlibTools.LoadAssembly(_testAssemblyPath);
-        string method = "WriteLine"; // Common method likely to be called
-
-        // Act
-        string[] result = DnlibTools.FindMethodUsages(method);
-        string[] nonExistingResult = DnlibTools.FindMethodUsages("NonExistingMethodXYZ123");
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.NotNull(nonExistingResult);
-        if (nonExistingResult.Length == 1)
-        {
-            Assert.Contains($"No usages of 'NonExistingMethodXYZ123' found.", nonExistingResult);
-        }
-    }
-
-    [Fact]
     public void ExtractControlFlowGraph_ReturnsControlFlowGraph()
     {
         // Arrange
@@ -281,25 +235,6 @@ public class DnlibToolsTests
         {
             Assert.Contains($"No methods matching 'NonExistingMethod' found.", nonExistingResult);
         }
-    }
-
-    [Fact]
-    public void GetMethodILBodyByName_ReturnsCorrectIL()
-    {
-        // Arrange
-        DnlibTools.LoadAssembly(_testAssemblyPath);
-
-        // Act
-        string[] result = DnlibTools.GetMethodILBodyByName(_methodName);
-        string[] nonExistingResult = DnlibTools.GetMethodILBodyByName("NonExistingMethod");
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.NotEmpty(result);
-        
-        Assert.NotNull(nonExistingResult);
-        Assert.Single(nonExistingResult);
-        Assert.Contains($"No methods matching 'NonExistingMethod' found.", nonExistingResult);
     }
 
     [Fact]
@@ -492,5 +427,19 @@ public class DnlibToolsTests
         {
             throw ex;
         }
+    }
+    
+    [Fact]
+    public void DecompileMethodByRID()
+    {
+        DnlibTools.LoadAssembly(_testAssemblyPath);
+        // First find a valid method with RID
+        string[] methods = DnlibTools.FindMethodsWithRegex("Main");
+        Assert.NotEmpty(methods);
+        JsonElement methodInfo = JsonSerializer.Deserialize<JsonElement>(methods[0]);
+        uint rid = (uint)methodInfo.GetProperty("RID").GetInt64();
+        // Act
+        string result = DnlibTools.Decompile_Method_By_RID(rid);
+        Assert.DoesNotContain("Decompilation failed", result);
     }
 }

@@ -9,7 +9,11 @@ using dnlib.DotNet.Emit;
 using dnlib.DotNet.MD;
 using dnlib.DotNet.Writer;
 using dnlib.PE;
+using System.Reflection.Metadata;
+using ICSharpCode.Decompiler.Metadata;
 using MCPPOC;
+using Metadata = dnlib.DotNet.MD.Metadata;
+using OperandType = dnlib.DotNet.Emit.OperandType;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 //builder.Logging.AddConsole(consoleLogOptions =>
@@ -149,27 +153,6 @@ public static class DnlibTools
         };
         
         return JsonSerializer.Serialize(data);
-    }
-
-    [McpServerTool, Description("List all types in a .NET assembly")]
-    public static String[] ListTypes(
-            [Description("Offset to start listing from(start at 0)")]
-        int offset = 0,
-            [Description("Number of items to list(100 is a good number,0 means remainder)")]
-        int pageSize = 100)
-    
-    {
-        if (Module == null)
-            return new[] { "No assembly loaded." };
-
-        var types = Module.Types.Select(t => new
-        {
-            Name = t.Name.ToString(),
-            FullName = t.FullName.ToString(),
-            NameSpace = t.Namespace.ToString(),
-            MDToken = t.MDToken.ToInt32(),
-        }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset,pageSize) : new[] { "No types found." };
     }
     
      // Find Types with name match regex
@@ -497,96 +480,6 @@ public static class DnlibTools
         return dependencies.ToArray();
     }
 
-    [McpServerTool, Description("Find all usages of a specified method")]
-    public static string[] FindMethodUsages(string methodName,
-    [Description("Offset to start listing from(start at 0)")]
-    int offset = 0,
-    [Description("Number of items to list(100 is a good number,0 means remainder)")]
-    int pageSize = 100
-    )
-    {
-        if (Module == null)
-            return new[] { "No assembly loaded." };
-        
-        var usages = new List<string>();
-        
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
-            {
-                if (method.Body == null) continue;
-                
-                foreach (var instr in method.Body.Instructions)
-                {
-                    if (instr.Operand is IMethod calledMethod && 
-                        calledMethod.FullName.Contains(methodName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        usages.Add($"{method.FullName} calls {calledMethod.FullName} at IL_{instr.Offset:X4}");
-                    }
-                }
-            }
-        }
-        
-        return usages.Count > 0 ? paginate.Paginate(usages.ToArray(),offset, pageSize) : new[] { $"No usages of '{methodName}' found." };
-    }
-
-    [McpServerTool, Description("Find possible reflection usage in the assembly")]
-    public static string[] FindReflectionUsage([Description("Offset to start listing from(start at 0)")]
-        int offset = 0,
-        [Description("Number of items to list(100 is a good number,0 means remainder)")]
-        int pageSize = 100)
-    {
-        if (Module == null)
-            return new[] { "No assembly loaded." };
-        var results = new List<string>();
-        string[] reflectionPatterns = new[] {
-            "System.Reflection",
-            "GetType",
-            "InvokeMember",
-            "Invoke",
-            "Assembly.Load",
-            "GetMethod",
-            "GetField",
-            "GetProperty"
-        };
-        
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
-            {
-                if (method.Body == null) continue;
-                
-                foreach (var instr in method.Body.Instructions)
-                {
-                    if (instr.Operand is IMethod calledMethod)
-                    {
-                        foreach (var pattern in reflectionPatterns)
-                        {
-                            if (calledMethod.FullName.Contains(pattern))
-                            {
-                                results.Add($"{method.FullName}: {calledMethod.FullName} at IL_{instr.Offset:X4}");
-                                break;
-                            }
-                        }
-                    }
-                    else if (instr.Operand is string str)
-                    {
-                        foreach (var pattern in reflectionPatterns)
-                        {
-                            if (str.Contains(pattern))
-                            {
-                                results.Add($"{method.FullName}: String literal \"{str}\" at IL_{instr.Offset:X4}");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return results.Count > 0 ? paginate.Paginate(results.ToArray(),offset, pageSize) : new[] { "No reflection usage found." };
-    }
-
     [McpServerTool, Description("Extract method control flow graph")]
     public static string[] ExtractControlFlowGraph(string methodName)
     {
@@ -688,60 +581,6 @@ public static class DnlibTools
 
         // Read the IL code bytes
         return output;
-    }
-    
-    // Dump IL code for a method by method name
-    [McpServerTool, Description("Get IL codes for a method by name")]
-    public static string[] GetMethodILBodyByName(string methodName)
-    {
-        if (Module == null)
-            return new[] { "No assembly loaded." };
-        
-        var results = new List<string>();
-        
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
-            {
-                if (method.FullName.Contains(methodName, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (method.Body == null)
-                    {
-                        results.Add($"Method {method.FullName} has no body");
-                        continue;
-                    }
-                    
-                    results.Add($"IL code for {method.FullName}:");
-                    
-                    // Get method file offset
-                    var offset = Module.Metadata.PEImage.ToFileOffset(method.RVA);
-                    
-                    
-                    // Get the raw IL bytes
-                    var data = GetRawILBytes(method, Module);
-                    if (data == null)
-                    {
-                        results.Add($"Failed to get raw IL bytes for {method.FullName}");
-                        break;
-                    }
-
-                    for (int i = 0; i < method.Body.Instructions.Count; i++)
-                    {
-                        var instr = method.Body.Instructions[i];
-                        var hexdump = "";
-                        if (i+1 < method.Body.Instructions.Count)
-                            hexdump =BitConverter.ToString(data.Code, (int)instr.Offset, (int)method.Body.Instructions[i+1].Offset-(int)instr.Offset).Replace("-", " ");
-                        else
-                            hexdump =BitConverter.ToString(data.Code, (int)instr.Offset).Replace("-", " ");
-                        results.Add($"{(data.CodeFileOffset+instr.Offset).ToString("x")} {hexdump} IL_{instr.Offset:X4}: {instr}");
-                    }
-
-                    break;
-                }
-            }
-        }
-        
-        return results.Count > 0 ? results.ToArray() : new[] { $"No methods matching '{methodName}' found." };
     }
     
     // Dump IL code for a method by method RID
@@ -927,68 +766,6 @@ public static class DnlibTools
         return $"Assembly saved to {path}.";
     }
     
-    // Patch method instruction
-    [McpServerTool, Description("Patch an instruction of a method")]
-    public static string UpdateMethodInstruction(
-        [Description("Method RID to patch")]
-        uint rid,
-        [Description("Offset to update")]
-        uint offset,
-        [Description("new instruction to replace (e.g., 'nop')")]
-        string newInstruction)
-    {
-        if (Module == null)
-            return "No assembly loaded.";
-        
-        var method = Module.ResolveMethod(rid);
-        if (method == null)
-            return $"Method with RID '{rid}' not found.";
-        
-        if (method.Body == null)
-            return $"Method {method.FullName} has no body";
-        
-        var instruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == offset);
-        if (instruction == null)
-            return $"Instruction at offset {offset} not found in method {method.FullName}.";
-        
-        // Parse the new instruction
-        Instruction ins = null;
-        try
-        {
-            ins = parser.ParseSingleInstruction(newInstruction);
-        }
-        catch (Exception ex)
-        {
-            return $"Failed to parse new instruction: {ex.Message}";
-        }
-
-        if (ins == null )
-            return $"Failed to parse new instruction: {newInstruction}";
-
-        if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
-        {
-            var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length != 2)
-                return $"Instruction at offset {offset} has an invalid format";
-            var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
-            var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
-            if (targetInstruction == null)
-                return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
-            ins.Operand = targetInstruction;
-        }
-        
-        // Replace the instruction
-        var index = method.Body.Instructions.IndexOf(instruction);
-        if (index < 0)
-            return $"Instruction at offset {offset} not found in method {method.FullName}.";
-        method.Body.Instructions[index] = ins;
-        
-        method.Body.UpdateInstructionOffsets();
-        
-        return $"Method {method.FullName} updated successfully.";
-    }
-    
-    
     // Patch method instructions
     [McpServerTool, Description("Patch method instructions")]
     public static string UpdateMethodInstructions(
@@ -1077,34 +854,6 @@ public static class DnlibTools
                     break;
                 }
             }
-            // if (ins.OpCode.OperandType == OperandType.ShortInlineBrTarget)
-            // {
-            //     var parts = ((string)ins.Operand).Split('_', StringSplitOptions.RemoveEmptyEntries);
-            //     if (parts.Length != 2)
-            //         return $"Instruction at offset {offset} has an invalid format";
-            //     var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
-            //     var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
-            //     if (targetInstruction == null)
-            //         return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
-            //     ins.Operand = targetInstruction;
-            // } else if (ins.OpCode.OperandType == OperandType.InlineSwitch)
-            // {
-            //     if (ins.Operand == null)
-            //         return $"Instruction at offset {offset} has an invalid format";
-            //     
-            //     var ListSwitch = new List<Instruction>();
-            //     foreach (var data in ins.Operand as string[])
-            //     {
-            //         var parts = data.Split('_', StringSplitOptions.RemoveEmptyEntries);
-            //         if (parts.Length != 2)
-            //             return $"Instruction at offset {offset} has an invalid format";
-            //         var targetOffset = uint.Parse(parts[1], System.Globalization.NumberStyles.HexNumber);
-            //         var targetInstruction = method.Body.Instructions.FirstOrDefault(i => i.Offset == targetOffset);
-            //         if (targetInstruction == null)
-            //             return $"Target instruction at offset {targetOffset} not found in method {method.FullName}.";
-            //         ListSwitch.Add(targetInstruction);
-            //     }
-            // }
         }
         
         // If the new instructions are longer than the original, clear the existing instructions
@@ -1177,5 +926,54 @@ public static class DnlibTools
         return references.Count > 0
             ? paginate.Paginate(references.ToArray(), offset, pageSize)
             : new[] { $"No references to field '{fieldName}' found." };
+    }
+    
+    [McpServerTool, Description("Decompile method by RID to C# source code")]
+    public static string Decompile_Method_By_RID(
+        [Description("RID value for method")] uint rid)
+    {
+        if (Module == null)
+            return "No assembly loaded.";
+        
+        try
+        {
+            // Resolve the method using RID
+            var method = Module.ResolveMethod(rid);
+            if (method == null)
+                return $"Method with RID '{rid}' not found.";
+            
+            // Get the module file path
+            string modulePath = Module.Location;
+            if (string.IsNullOrEmpty(modulePath))
+                return "Cannot decompile: module file path not available.";
+            
+            // Create decompiler settings
+            var decompilerSettings = new ICSharpCode.Decompiler.DecompilerSettings {
+                //ShowXmlDocumentation = true,
+                //AlwaysShowMethodBodies = true,
+                //UseDebugSymbols = true
+            };
+        
+            // Create the decompiler
+            var decompiler = new ICSharpCode.Decompiler.CSharp.CSharpDecompiler(
+                modulePath, 
+                decompilerSettings);
+        
+            // Get the token
+            var token = method.MDToken;
+
+            // Convert token to EntityHandle
+            var handle = MetadataTokenHelpers.EntityHandleOrNil(token.ToInt32());
+            if (handle.IsNil)
+                return $"Invalid token: {token}";
+            
+            var decompiledCode = decompiler.DecompileAsString(handle);
+        
+            return decompiledCode;
+        }
+        catch (Exception ex)
+        {
+            return $"Decompilation failed: {ex.Message}\n{ex.StackTrace}";
+        }
     }
 }
