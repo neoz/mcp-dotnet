@@ -150,10 +150,7 @@ public class InstructionParser
                 if (int.TryParse(operandStr, out var varIndex))
                     return varIndex;
                 
-                ResolveParameter(operandStr);
-                
-                return operandStr;
-                //throw new ArgumentException($"Invalid variable index: {operandStr}");
+                return ResolveParameter(operandStr);
             
             case OperandType.InlineSwitch:
                 // Handle switch targets (e.g., switch (IL_0010, IL_0020, IL_0030))
@@ -489,8 +486,6 @@ public class InstructionParser
                     typeRef = new TypeRefUser(_module, name, ns);
                     return typeRef.ToTypeSig();
                 }
-
-                //throw new ArgumentException($"Unsupported type signature: {typeSignature}");
         }
     }
 
@@ -508,35 +503,3 @@ public class InstructionParser
         return _module.Import(type);
     }
 }
-
-// Example usage
-// public class Program
-// {
-//     public static void Main()
-//     {
-//         // Load a module (e.g., the current assembly)
-//         var module = ModuleDefMD.Load(typeof(Program).Assembly.Location);
-//
-//         var parser = new InstructionParser(module);
-//
-//         // Example input string
-//         var input = @"
-//             ldstr ""Hello, World!""
-//             call System.Console::WriteLine
-//             ret
-//         ";
-//
-//         try
-//         {
-//             var instructions = parser.ParseInstructions(input);
-//             foreach (var instr in instructions)
-//             {
-//                 Console.WriteLine($"Parsed: {instr}");
-//             }
-//         }
-//         catch (Exception ex)
-//         {
-//             Console.WriteLine($"Error: {ex.Message}");
-//         }
-//     }
-// }
