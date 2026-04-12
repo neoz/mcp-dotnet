@@ -1,26 +1,19 @@
 ﻿using dnlib.DotNet;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text.Json;
 using dnlib.DotNet.Emit;
 using dnlib.DotNet.MD;
 using dnlib.DotNet.Writer;
-using dnlib.PE;
 using System.Reflection.Metadata;
+using dnlib.PE;
 using ICSharpCode.Decompiler.Metadata;
 using MCPPOC;
-using Metadata = dnlib.DotNet.MD.Metadata;
 using OperandType = dnlib.DotNet.Emit.OperandType;
 
 var builder = Host.CreateEmptyApplicationBuilder(settings: null);
-//builder.Logging.AddConsole(consoleLogOptions =>
-//{
-//    // Configure all logs to go to stderr
-//    consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
-//});
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
@@ -32,6 +25,20 @@ public static class DnlibTools
 {
     public static ModuleDefMD? Module = null;
     public static InstructionParser parser = null;
+
+    private static string[] PaginateResults(string[] items, int offset, int pageSize, string emptyMessage)
+    {
+        return items.Length > 0 ? paginate.Paginate(items, offset, pageSize) : new[] { emptyMessage };
+    }
+
+    private static IEnumerable<(MethodDef Method, Instruction Instr)> AllInstructions()
+    {
+        foreach (var type in Module!.Types)
+            foreach (var method in type.Methods)
+                if (method.Body != null)
+                    foreach (var instr in method.Body.Instructions)
+                        yield return (method, instr);
+    }
 
     [McpServerTool, Description("Load a .NET assembly into memory")]
     public static string LoadAssembly(
@@ -66,11 +73,7 @@ public static class DnlibTools
                     return $"Failed to load assembly: {ex.Message}";
                 }
             }
-            Module = ModuleDefMD.Load(AssemblyPath,context: moduleContext);
-            if (Module != null)
-            {
-                parser = new InstructionParser(Module);
-            }
+            parser = new InstructionParser(Module);
             return $"Assembly '{AssemblyPath}' loaded successfully.";
         }
         catch (Exception ex)
@@ -109,7 +112,6 @@ public static class DnlibTools
         return false;
     }
     
-    // Get metadata of the assembly
     [McpServerTool, Description("Get metadata of the assembly")]
     public static string GetMetadata()
     {
@@ -126,7 +128,6 @@ public static class DnlibTools
         return JsonSerializer.Serialize(metadata);
     }
     
-    // Get entry point method
     [McpServerTool, Description("Get entry point method")]
     public static string GetEntryPoint()
     {
@@ -155,7 +156,6 @@ public static class DnlibTools
         return JsonSerializer.Serialize(data);
     }
     
-     // Find Types with name match regex
     [McpServerTool, Description("List all types in a .NET assembly matching a regex")]
     public static string[] ListTypesRegex(
         [Description("Regex pattern to match type names")]
@@ -177,10 +177,9 @@ public static class DnlibTools
             NameSpace = t.Namespace.ToString(),
             Token = t.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset,pageSize) : new[] { $"No types matching '{pattern}' found." };
+        return PaginateResults(types, offset, pageSize, $"No types matching '{pattern}' found.");
     }
     
-    // List methods of a type name
     [McpServerTool, Description("List all methods in a .NET assembly")]
     public static string[] ListMethods(
         [Description("Full Name of the type")]
@@ -207,10 +206,9 @@ public static class DnlibTools
             Parameters = m.MethodSig.Params.Select(p => p.ToString()).ToArray(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
         
-        return methods.Length > 0 ? paginate.Paginate(methods,offset, pageSize) : new[] { $"No methods found for '{typeName}'." };
+        return PaginateResults(methods, offset, pageSize, $"No methods found for '{typeName}'.");
     }
     
-    // Find Methods with name match regex
     [McpServerTool, Description("Find methods by name matching a regex pattern")]
     public static string[] Find_Methods_By_Name(
         [Description("Regex pattern to match method names")]
@@ -235,7 +233,7 @@ public static class DnlibTools
                 Parameters = t.MethodSig.Params.Select(p => p.ToString()).ToArray(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
-        return matchingMethods.Length > 0 ? paginate.Paginate(matchingMethods,offset, pageSize) : new[] { $"No methods matching '{pattern}' found." };
+        return PaginateResults(matchingMethods, offset, pageSize, $"No methods matching '{pattern}' found.");
     }
     
     [McpServerTool, Description("List all fields in a .NET assembly")]
@@ -249,16 +247,15 @@ public static class DnlibTools
         if (Module == null)
             return new[] { "No assembly loaded." };
 
-        var types = Module.Types.SelectMany(t => t.Fields).Select(f => new
+        var fields = Module.Types.SelectMany(t => t.Fields).Select(f => new
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No fields found." };
+        return PaginateResults(fields, offset, pageSize, "No fields found.");
     }
-    
-    
+
     [McpServerTool, Description("List all properties in a .NET assembly")]
     public static string[] ListProperties(
         [Description("Offset to start listing from(start at 0)")]
@@ -270,14 +267,15 @@ public static class DnlibTools
         if (Module == null)
             return new[] { "No assembly loaded." };
 
-        var types = Module.Types.SelectMany(t => t.Properties).Select(f => new
+        var properties = Module.Types.SelectMany(t => t.Properties).Select(f => new
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No properties found." };
+        return PaginateResults(properties, offset, pageSize, "No properties found.");
     }
+
     [McpServerTool, Description("List all events in a .NET assembly")]
     public static string[] ListEvents(
         [Description("Offset to start listing from(start at 0)")]
@@ -289,15 +287,15 @@ public static class DnlibTools
         if (Module == null)
             return new[] { "No assembly loaded." };
 
-        var types = Module.Types.SelectMany(t => t.Events).Select(f => new
+        var events = Module.Types.SelectMany(t => t.Events).Select(f => new
         {
             Name = f.Name.ToString(),
             FullName = f.FullName.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No properties found." };
+        return PaginateResults(events, offset, pageSize, "No events found.");
     }
-    
+
     [McpServerTool, Description("List all resources in a .NET assembly")]
     public static string[] ListResources(
         [Description("Offset to start listing from(start at 0)")]
@@ -308,14 +306,14 @@ public static class DnlibTools
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
-        
-        var types = Module.Resources.Select(f => new
+
+        var resources = Module.Resources.Select(f => new
         {
             Name = f.Name.ToString(),
             ResourceType = f.ResourceType.ToString(),
             MDToken = f.MDToken.ToInt32(),
         }).Select(t => JsonSerializer.Serialize(t)).ToArray();
-        return types.Length > 0 ? paginate.Paginate(types,offset, pageSize) : new[] { "No data found." };
+        return PaginateResults(resources, offset, pageSize, "No data found.");
     }
 
     [McpServerTool, Description("Get detailed information about a specific type")]
@@ -350,36 +348,25 @@ public static class DnlibTools
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
-        
+
         var strings = new HashSet<string>();
-        
-        foreach (var type in Module.Types)
+        foreach (var (method, instr) in AllInstructions())
         {
-            foreach (var method in type.Methods)
+            if (instr.Operand is string str)
             {
-                if (method.Body == null)
-                    continue;
-                    
-                foreach (var instr in method.Body.Instructions)
+                strings.Add(JsonSerializer.Serialize(new
                 {
-                    if (instr.Operand is string str)
-                    {
-                        var data = new
-                        {
-                            MethodName = method.Name.ToString(),
-                            FullName = method.FullName.ToString(),
-                            MDToken = method.MDToken.ToInt32(),
-                            RID = method.Rid,
-                            StringLiteral = str,
-                            InstrOffset = instr.Offset,
-                        };
-                        strings.Add(JsonSerializer.Serialize(data));
-                    }
-                }
+                    MethodName = method.Name.ToString(),
+                    FullName = method.FullName.ToString(),
+                    MDToken = method.MDToken.ToInt32(),
+                    RID = method.Rid,
+                    StringLiteral = str,
+                    InstrOffset = instr.Offset,
+                }));
             }
         }
-        
-        return paginate.Paginate(strings.ToArray(),offset, pageSize);
+
+        return paginate.Paginate(strings.ToArray(), offset, pageSize);
     }
 
     [McpServerTool, Description("Search for types full name containing a substring")]
@@ -405,7 +392,7 @@ public static class DnlibTools
                 Namespace = f.Namespace.ToString(),
             }).Select(t => JsonSerializer.Serialize(t)).ToArray();
             
-        return matchingTypes.Length > 0 ? paginate.Paginate(matchingTypes,offset, pageSize) : new[] { $"No types matching '{substring}' found." };
+        return PaginateResults(matchingTypes, offset, pageSize, $"No types matching '{substring}' found.");
     }
 
     [McpServerTool, Description("Examine constructor initialization for a type")]
@@ -583,7 +570,6 @@ public static class DnlibTools
         return output;
     }
     
-    // Dump IL code for a method by method RID
     [McpServerTool, Description("Get IL codes for a method by RID")]
     public static string[] GetMethodILBodyByRID(
         [Description("RID value for method")] uint rid
@@ -624,80 +610,47 @@ public static class DnlibTools
             results.Add($"{(data.CodeFileOffset+instr.Offset).ToString("x")} {hexdump} IL_{instr.Offset:X4}: {instr}");
         }
         
-        return results.Count > 0 ? results.ToArray() : new[] { $"No methods with RID '{rid}' found." };
+        return results.ToArray();
     }
     
-    // Find references to a specific method token, return array of strings each string is a JSON object with the following properties: MethodName, FullName, MDToken, Parameters
     [McpServerTool, Description("Find references to a specific method")]
     public static string[] FindMethodReferences(int token)
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
-        
-        var results = new List<string>();
-        
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
+
+        var results = AllInstructions()
+            .Where(x => x.Instr.Operand is IMethodDefOrRef methodRef && methodRef.MDToken.ToInt32() == token)
+            .Select(x => JsonSerializer.Serialize(new
             {
-                if (method.Body == null) continue;
-                
-                foreach (var instr in method.Body.Instructions)
-                {
-                    if (instr.Operand is IMethodDefOrRef methodRef && methodRef.MDToken.ToInt32() == token)
-                    {
-                        var data = new
-                        {
-                            MethodName = method.Name.ToString(),
-                            FullName = method.FullName.ToString(),
-                            MDToken = method.MDToken.ToInt32(),
-                            Parameters = method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
-                        };
-                        results.Add(JsonSerializer.Serialize(data));
-                    }
-                }
-            }
-        }
-        
-        return results.Count > 0 ? results.ToArray() : new[] { $"No references to method token '{token}' found." };
+                MethodName = x.Method.Name.ToString(),
+                FullName = x.Method.FullName.ToString(),
+                MDToken = x.Method.MDToken.ToInt32(),
+                Parameters = x.Method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+            })).ToArray();
+
+        return results.Length > 0 ? results : new[] { $"No references to method token '{token}' found." };
     }
     
-    // Find references to a specific string, return array of strings each string is a JSON object with the following properties: MethodName, FullName, MDToken, Parameters
     [McpServerTool, Description("Find references to a specific string")]
     public static string[] FindStringReferences(string str)
     {
         if (Module == null)
             return new[] { "No assembly loaded." };
-        
-        var results = new List<string>();
-        
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
+
+        var results = AllInstructions()
+            .Where(x => x.Instr.Operand is string strRef && strRef.Contains(str))
+            .Select(x => JsonSerializer.Serialize(new
             {
-                if (method.Body == null) continue;
-                
-                foreach (var instr in method.Body.Instructions)
-                {
-                    if (instr.Operand is string strRef && strRef.Contains(str))
-                    {
-                        var data = new
-                        {
-                            MethodName = method.Name.ToString(),
-                            FullName = method.FullName.ToString(),
-                            MDToken = method.MDToken.ToInt32(),
-                            Parameters = method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
-                        };
-                        results.Add(JsonSerializer.Serialize(data));
-                    }
-                }
-            }
-        }
-        
-        return results.Count > 0 ? results.ToArray() : new[] { $"No references to string '{str}' found." };
+                MethodName = x.Method.Name.ToString(),
+                FullName = x.Method.FullName.ToString(),
+                MDToken = x.Method.MDToken.ToInt32(),
+                Parameters = x.Method.MethodSig.Params.Select(p => p.ToString()).ToArray(),
+            })).ToArray();
+
+        return results.Length > 0 ? results : new[] { $"No references to string '{str}' found." };
     }
     
-    // Read memory data at, specified RVA and size
     [McpServerTool, Description("Read memory data at specified RVA with size")]
     public static string ReadMemoryData(
         [Description("RVA to read from")]
@@ -715,7 +668,6 @@ public static class DnlibTools
         return JsonSerializer.Serialize(data);
     }
     
-    // Save assembly using dnlib
     [McpServerTool, Description("Save assembly to a file")]
     public static string SaveAssembly(
         [Description("Path to save the assembly")]
@@ -731,7 +683,6 @@ public static class DnlibTools
         {
             if (mixedMode)
             {
-                //Save the assembly in mixed mode to the specified path and write options
                 var options = new NativeModuleWriterOptions(Module, false)
                 {
                     MetadataOptions =
@@ -745,7 +696,6 @@ public static class DnlibTools
             }
             else
             {
-                // Save the assembly to the specified path and write options
                 var options = new ModuleWriterOptions(Module)
                 {
                     MetadataOptions =
@@ -766,7 +716,6 @@ public static class DnlibTools
         return $"Assembly saved to {path}.";
     }
     
-    // Patch method instructions
     [McpServerTool, Description("Patch method instructions")]
     public static string UpdateMethodInstructions(
         [Description("Method RID to patch")]
@@ -894,7 +843,6 @@ public static class DnlibTools
         return $"Method {method.FullName} update successfully.";
     }
     
-    // Find all usages of a specified field
     [McpServerTool, Description("Find all usages of a specified field")]
     public static string[] FindFieldReferences(
         string fieldName,
@@ -904,28 +852,13 @@ public static class DnlibTools
         if (Module == null)
             return new[] { "No assembly loaded." };
 
-        var references = new List<string>();
-
-        foreach (var type in Module.Types)
-        {
-            foreach (var method in type.Methods)
-            {
-                if (method.Body == null) continue;
-
-                foreach (var instr in method.Body.Instructions)
-                {
-                    if (instr.Operand is IField field &&
+        var references = AllInstructions()
+            .Where(x => x.Instr.Operand is IField field &&
                         field.FullName.Contains(fieldName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        references.Add($"{method.FullName} accesses {field.FullName} at IL_{instr.Offset:X4}");
-                    }
-                }
-            }
-        }
+            .Select(x => $"{x.Method.FullName} accesses {((IField)x.Instr.Operand).FullName} at IL_{x.Instr.Offset:X4}")
+            .ToArray();
 
-        return references.Count > 0
-            ? paginate.Paginate(references.ToArray(), offset, pageSize)
-            : new[] { $"No references to field '{fieldName}' found." };
+        return PaginateResults(references, offset, pageSize, $"No references to field '{fieldName}' found.");
     }
     
     [McpServerTool, Description("Decompile method by RID to C# source code")]
@@ -1001,7 +934,6 @@ public static class DnlibTools
         {
             try
             {
-                // Get basic field information
                 var fieldInfo = new
                 {
                     Name = field.Name.ToString(),
@@ -1013,18 +945,7 @@ public static class DnlibTools
                     HasConstant = field.HasConstant,
                     Constant = field.HasConstant ? field.Constant.Value : "N/A"
                 };
-            
-                // For literal/constant fields, we can get the value directly
-                if (field.HasConstant)
-                {
-                    results.Add(JsonSerializer.Serialize(fieldInfo));
-                }
-                else
-                {
-                    // For non-literal static fields, we can only report metadata
-                    // Getting runtime values would require loading the assembly into AppDomain
-                    results.Add(JsonSerializer.Serialize(fieldInfo));
-                }
+                results.Add(JsonSerializer.Serialize(fieldInfo));
             }
             catch (Exception ex)
             {
